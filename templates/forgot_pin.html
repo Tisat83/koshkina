@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Восстановление PIN | Мой дом на Кошкина{% endblock %}
+
+{% block content %}
+<section class="auth-section">
+    <h1>Восстановление PIN</h1>
+    <p class="auth-description">
+        Самостоятельно восстановить PIN нельзя — так безопаснее.
+        Восстановление делает администратор, выдавая одноразовую ссылку для вашей квартиры.
+    </p>
+
+    <div class="auth-form">
+        <p><strong>Что делать:</strong></p>
+        <ol>
+            <li>Обратитесь к администратору дома.</li>
+            <li>Администратор создаст одноразовую ссылку для вашей квартиры.</li>
+            <li>По ссылке вы зададите новый PIN и сможете войти.</li>
+        </ol>
+
+        <hr style="border: none; border-top: 1px solid var(--border-color); margin: 12px 0;" />
+
+        <p style="margin: 0;">
+            <strong>Для администратора (если вы сами забыли PIN):</strong><br>
+            временно включите аварийный вход по телефону, чтобы зайти и создать себе ссылку:
+            <br><code>set ALLOW_PHONE_FALLBACK=1</code> (в этом же окне CMD) и снова запустите <code>python app.py</code>.
+            После восстановления выключите режим: <code>set ALLOW_PHONE_FALLBACK=0</code>.
+        </p>
+    </div>
+
+    <div style="margin-top: 12px;">
+        <a class="btn-primary" href="{{ url_for('login') }}">Назад к входу</a>
+    </div>
+</section>
+{% endblock %}

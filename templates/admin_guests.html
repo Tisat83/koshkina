@@ -1,0 +1,323 @@
+{% extends "base.html" %}
+
+{% block title %}Гостевые заявки на парковку{% endblock %}
+
+{% block content %}
+<div class="admin-guests-root">
+    <h1 class="page-title">Гостевые заявки на парковку</h1>
+
+    {% if not guests %}
+        <p class="empty-note">Пока нет ни одной заявки.</p>
+    {% else %}
+        <div class="table-wrapper">
+            <table class="guests-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Статус</th>
+                        <th>Имя</th>
+                        <th>Телефон</th>
+                        <th>Номер машины</th>
+                        <th>Место</th>
+                        <th>Фото</th>
+                        <th>Комментарий</th>
+                        <th>Создано</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for g in guests %}
+                    <tr class="row-status-{{ g.status }}">
+                        <td>{{ g.id }}</td>
+                        <td>
+                            {% if g.status == "approved" %}
+                                <span class="status-pill status-approved">одобрена</span>
+                            {% elif g.status == "rejected" %}
+                                <span class="status-pill status-rejected">отклонена</span>
+                            {% else %}
+                                <span class="status-pill status-pending">в ожидании</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ g.name or '—' }}</td>
+                        <td>{{ g.phone or '—' }}</td>
+                        <td>{{ g.car_number or '—' }}</td>
+                        <td>
+                            {% if g.spot_id %}
+                                Место {{ g.spot_id }}
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+						    <td>
+    {% if g.photo %}
+        <img src="{{ url_for('static', filename=g.photo) }}"
+             alt="Фото машины"
+             class="guest-photo-thumb"
+             data-full="{{ url_for('static', filename=g.photo) }}">
+    {% else %}
+        —
+    {% endif %}
+</td>
+
+
+                        <td class="cell-comment">
+                            {{ g.comment or '—' }}
+                        </td>
+                        <td class="cell-date">
+                            {{ g.created_at or '—' }}
+                        </td>
+                        <td class="cell-actions">
+                            <form method="post" style="display:inline;">
+                                <input type="hidden" name="guest_id" value="{{ g.id }}">
+                                <button
+                                    type="submit"
+                                    name="action"
+                                    value="approve"
+                                    class="btn-small"
+                                >
+                                    Одобрить
+                                </button>
+                            </form>
+
+                            <form method="post" style="display:inline;">
+                                <input type="hidden" name="guest_id" value="{{ g.id }}">
+                                <button
+                                    type="submit"
+                                    name="action"
+                                    value="reject"
+                                    class="btn-small btn-danger"
+                                >
+                                    Отклонить
+                                </button>
+                            </form>
+
+                            <form method="post" style="display:inline;">
+                                <input type="hidden" name="guest_id" value="{{ g.id }}">
+                                <button
+                                    type="submit"
+                                    name="action"
+                                    value="reset"
+                                    class="btn-small btn-secondary"
+                                >
+                                    В ожидание
+                                </button>
+                            </form>
+							<form method="post" style="display:inline;">
+                                    <input type="hidden" name="guest_id" value="{{ g.id }}">
+                                    <button
+                                        type="submit"
+                                        name="action"
+                                        value="delete"
+                                        class="btn-small btn-danger"
+                                        onclick="return confirm('Точно удалить заявку №{{ g.id }}?');"
+                                    >
+                                        Удалить
+                                    </button>
+                                </form>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+</div>
+
+{# модалка для увеличенного фото #}
+<div id="photo-modal" class="photo-modal">
+    <div class="photo-modal-inner">
+        <button type="button" class="photo-modal-close" id="photo-modal-close">×</button>
+        <img src="" alt="Фото машины" id="photo-modal-img">
+    </div>
+</div>
+
+<style>
+.admin-guests-root {
+    padding: 24px 16px 40px;
+}
+
+.page-title {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 16px;
+}
+
+.empty-note {
+    opacity: 0.8;
+}
+
+.table-wrapper {
+    overflow-x: auto;
+}
+
+.guests-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.guests-table th,
+.guests-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+    text-align: left;
+    vertical-align: top;
+}
+
+.guests-table thead th {
+    font-weight: 500;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.7;
+}
+
+.cell-comment {
+    max-width: 260px;
+}
+
+.cell-date,
+.cell-actions {
+    white-space: nowrap;
+}
+
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 6px;
+    border-radius: 999px;
+    font-size: 11px;
+}
+
+.status-pending {
+    background: rgba(251, 191, 36, 0.12);
+    color: #facc15;
+}
+
+.status-approved {
+    background: rgba(52, 211, 153, 0.12);
+    color: #34d399;
+}
+
+.status-rejected {
+    background: rgba(248, 113, 113, 0.12);
+    color: #f97373;
+}
+
+/* кнопки */
+.btn-small {
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.5);
+    background: transparent;
+    color: inherit;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    margin-right: 4px;
+}
+
+.btn-small:hover {
+    background: rgba(148, 163, 184, 0.2);
+}
+
+.btn-small.btn-danger {
+    border-color: rgba(248, 113, 113, 0.8);
+    color: #fecaca;
+}
+
+.btn-small.btn-secondary {
+    border-color: rgba(148, 163, 184, 0.8);
+}
+
+/* фото-миниатюра */
+.guest-photo-thumb {
+    max-width: 64px;
+    max-height: 64px;
+    border-radius: 8px;
+    object-fit: cover;
+    cursor: pointer;
+}
+
+/* модальное окно с фото */
+.photo-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.9);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+
+.photo-modal.is-open {
+    display: flex;
+}
+
+.photo-modal-inner {
+    position: relative;
+    max-width: 90vw;
+    max-height: 90vh;
+}
+
+.photo-modal-inner img {
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: 16px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+}
+
+.photo-modal-close {
+    position: absolute;
+    top: -12px;
+    right: -12px;
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    border: none;
+    background: rgba(15, 23, 42, 0.9);
+    color: #e5e7eb;
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+}
+</style>
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    const modal = document.getElementById("photo-modal");
+    const modalImg = document.getElementById("photo-modal-img");
+    const modalClose = document.getElementById("photo-modal-close");
+
+    if (!modal || !modalImg) return;
+
+    document.querySelectorAll(".guest-photo-thumb").forEach(img => {
+        img.addEventListener("click", () => {
+            const full = img.dataset.full || img.src;
+            modalImg.src = full;
+            modal.classList.add("is-open");
+        });
+    });
+
+    function closeModal() {
+        modal.classList.remove("is-open");
+        modalImg.src = "";
+    }
+
+    if (modalClose) {
+        modalClose.addEventListener("click", closeModal);
+    }
+
+    modal.addEventListener("click", (e) => {
+        if (e.target === modal) {
+            closeModal();
+        }
+    });
+
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+            closeModal();
+        }
+    });
+});
+</script>
+{% endblock %}

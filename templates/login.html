@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}Вход для жильцов | Мой дом на Кошкина{% endblock %}
+
+{% block content %}
+<section class="auth-section">
+    <h1>Вход для жильцов</h1>
+    <p class="auth-description">
+        Введите номер квартиры и ваш PIN (4–8 цифр).
+        Если вы забыли PIN — нажмите «Забыли PIN?» и обратитесь к администратору за одноразовой ссылкой.
+    </p>
+
+    <form method="post" class="auth-form" autocomplete="on">
+        <div class="form-group">
+            <label for="apartment">Номер квартиры</label>
+            <input id="apartment" name="apartment" inputmode="numeric" pattern="[0-9]*" required />
+        </div>
+
+        <div class="form-group">
+            <label for="pin">PIN</label>
+            <input id="pin" name="pin" inputmode="numeric" pattern="[0-9]*" required />
+        </div>
+
+        <button class="btn-primary" type="submit">Войти</button>
+
+        <p class="auth-hint" style="margin-top: 10px;">
+            <a href="{{ url_for('forgot_pin') }}">Забыли PIN?</a>
+        </p>
+    </form>
+</section>
+{% endblock %}

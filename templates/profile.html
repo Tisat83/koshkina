@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+
+{% block title %}Профиль жильца | Мой дом на Кошкина{% endblock %}
+
+{% block content %}
+<section class="info-section auth-section">
+    <h1>Профиль жильца</h1>
+    <p class="auth-description">
+        Здесь можно обновить ФИО, телефоны, номер машины и при необходимости сменить PIN
+        для входа на сайт.
+    </p>
+
+    <form method="post" class="auth-form">
+        <div class="form-group">
+            <label>Квартира</label>
+            <input type="text" value="{{ apartment }}" disabled>
+        </div>
+
+        <div class="form-group">
+            <label for="last_name">Фамилия</label>
+            <input
+                type="text"
+                id="last_name"
+                name="last_name"
+                value="{{ last_name or '' }}"
+                autocomplete="family-name"
+            >
+        </div>
+
+        <div class="form-group">
+            <label for="first_name">Имя</label>
+            <input
+                type="text"
+                id="first_name"
+                name="first_name"
+                value="{{ first_name or '' }}"
+                autocomplete="given-name"
+            >
+        </div>
+
+        <div class="form-group">
+            <label for="middle_name">Отчество</label>
+            <input
+                type="text"
+                id="middle_name"
+                name="middle_name"
+                value="{{ middle_name or '' }}"
+                autocomplete="additional-name"
+            >
+        </div>
+
+        <hr style="margin: 12px 0; border: none; border-top: 1px solid var(--border-color);">
+
+        <div class="form-group">
+            <label for="phone1">Телефон основной</label>
+            <input
+                type="tel"
+                id="phone1"
+                name="phone1"
+                value="{{ phone1 or '' }}"
+                placeholder="+7 926 999-99-99"
+            >
+        </div>
+
+        <div class="form-group">
+            <label for="phone2">Телефон дополнительный</label>
+            <input
+                type="tel"
+                id="phone2"
+                name="phone2"
+                value="{{ phone2 or '' }}"
+                placeholder="+7 903 888-88-88"
+            >
+        </div>
+
+        {# Блок машины показываем только если для квартиры включена парковка #}
+        {% if can_use_parking %}
+        <div class="form-group">
+            <label for="car_number">Номер машины</label>
+            <input
+                type="text"
+                id="car_number"
+                name="car_number"
+                value="{{ car_number or '' }}"
+                placeholder="А123ЕВ77"
+                autocomplete="off"
+            >
+        </div>
+
+        <p class="auth-hint">
+            Эти данные будут использоваться для автозаполнения на парковке и
+            для связи с вами при необходимости.
+        </p>
+        {% endif %}
+
+        <hr style="margin: 12px 0; border: none; border-top: 1px solid var(--border-color);">
+
+        <h2 style="font-size: 16px; margin: 0 0 8px;">Сменить PIN</h2>
+        <p class="auth-hint">
+            PIN используется для входа. Можно использовать 4–8 цифр.
+            Если все поля ниже оставить пустыми, PIN не изменится.
+            Если PIN уже задан, для смены нужно указать текущий PIN и новый дважды.
+        </p>
+
+        <div class="form-group">
+            <label for="current_pin">Текущий PIN</label>
+            <input
+                type="password"
+                id="current_pin"
+                name="current_pin"
+                inputmode="numeric"
+                autocomplete="current-password"
+                placeholder="если PIN уже есть"
+            >
+        </div>
+
+        <div class="form-group">
+            <label for="pin1">Новый PIN</label>
+            <input
+                type="password"
+                id="pin1"
+                name="pin1"
+                inputmode="numeric"
+                autocomplete="new-password"
+                placeholder="4–8 цифр"
+            >
+        </div>
+
+        <div class="form-group">
+            <label for="pin2">Повторите новый PIN</label>
+            <input
+                type="password"
+                id="pin2"
+                name="pin2"
+                inputmode="numeric"
+                autocomplete="new-password"
+                placeholder="ещё раз тот же PIN"
+            >
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+            <a href="{{ url_for('news') }}" class="btn-secondary" style="text-decoration:none; text-align:center;">
+                Отмена
+            </a>
+            <button type="submit" class="btn-primary">
+                Сохранить профиль
+            </button>
+        </div>
+    </form>
+</section>
+{% endblock %}

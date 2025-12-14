@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+
+{% block title %}Добро пожаловать | Мой дом на Кошкина{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div class="hero-text">
+        <center><h1>Сообщество соседей
+		<br><b>«Мой дом на Кошкина»</b></h1></center><br>
+        <p>
+            Мы общаемся в чатах дома и делимся важной информацией.
+            В связи с возможными ограничениями WhatsApp основной канал общения
+            переносим в <strong>Telegram</strong> и мессенджер <strong>MAX</strong>.
+        </p>
+        <p>
+            На этом сайте дублируем важные объявления и новости района.
+            Вход в закрытый раздел доступен только жильцам по номеру квартиры и PIN-коду.
+        </p>
+        <p>
+            Для получения доступа к закрытому разделу, необходимо обратиться
+			к старшему по дому или его помощнику
+            Вход в закрытый раздел доступен только жильцам по номеру квартиры и PIN-коду.
+        </p>        <p>
+            После получения доступа вы сможете предлагать новости, 
+			а так же получите доступ к сообществам в мессенджерах.
+        </p><br>
+        <div class="hero-actions">
+            {% if session.get('user') %}
+                <a class="messenger-card telegram"
+                   href="https://t.me/+gXKlcEcH3TUxMDgy"
+                   target="_blank" rel="noopener">
+                    <div class="messenger-icon">
+                        <img src="{{ url_for('static', filename='img/telegram.svg') }}" alt="Telegram" />
+                    </div>
+                    <div class="messenger-text">
+                        <div class="messenger-title">Telegram-канал дома</div>
+                        <div class="messenger-subtitle">Основные объявления и обсуждения</div>
+                    </div>
+                </a>
+
+                <a class="messenger-card max"
+                   href="https://max.ru/join/U2yze39NsoRyzFmgn7v2z6ItsGnH5LowsoOEkP71Z3k"
+                   target="_blank" rel="noopener">
+                    <div class="messenger-icon">
+                        <img src="{{ url_for('static', filename='img/max.svg') }}" alt="MAX" />
+                    </div>
+                    <div class="messenger-text">
+                        <div class="messenger-title">Сообщество в MAX</div>
+                        <div class="messenger-subtitle">Резервный чат соседей</div>
+                    </div>
+                </a>
+            {% else %}
+                <div class="messenger-card telegram messenger-card--locked">
+                    <div class="messenger-icon">
+                        <img src="{{ url_for('static', filename='img/telegram.svg') }}" alt="Telegram" />
+                    </div>
+                    <div class="messenger-text">
+                        <div class="messenger-title">Telegram-канал дома</div>
+                        <div class="messenger-subtitle">Основные объявления и обсуждения</div>
+                    </div>
+                </div>
+
+                <div class="messenger-card max messenger-card--locked">
+                    <div class="messenger-icon">
+                        <img src="{{ url_for('static', filename='img/max.svg') }}" alt="MAX" />
+                    </div>
+                    <div class="messenger-text">
+                        <div class="messenger-title">Сообщество в MAX</div>
+                        <div class="messenger-subtitle">Резервный чат соседей</div>
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="hero-login">
+            {% if not session.get('user') %}
+                <a href="{{ url_for('login') }}" class="btn-primary">Вход для жильцов</a>
+            {% else %}
+                <a href="{{ url_for('news') }}" class="btn-primary">Перейти к новостям</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="hero-illustration">
+        <img src="{{ url_for('static', filename='img/telegram_welcome.png') }}"
+             alt="Сообщество соседей" class="hero-image" />
+    </div>
+</section>
+
+<section class="home-news-layout">
+    <div class="home-news-column">
+        <h2>Новости дома и района</h2>
+        <p class="news-intro">
+            Ниже — несколько последних публичных новостей. Полный список доступен после входа.
+        </p>
+
+        {% if public_posts %}
+            {# главная новость #}
+            {% set main_post = public_posts[0] %}
+            <article class="news-card home-news-main-card">
+                <a href="{{ url_for('news') }}#post-{{ main_post.id }}" class="home-news-clickable">
+                    {% if main_post.image %}
+                        <div class="news-image">
+                            <img src="{{ url_for('static', filename='img/' ~ main_post.image) }}"
+                                 alt="{{ main_post.title }}">
+                        </div>
+                    {% endif %}
+
+                    <header class="home-news-header">
+                        <h3 class="news-title">{{ main_post.title }}</h3>
+                        <div class="news-meta">
+                            <span class="news-date">{{ main_post.date|ru_date }}</span>
+                            {% if main_post.category %}
+                                <span class="news-category">{{ main_post.category }}</span>
+                            {% endif %}
+                        </div>
+                    </header>
+
+                    {% set text = main_post.text or '' %}
+                    <p class="news-text-short">
+                        {{ text|truncate(220, True, '…') }}
+                    </p>
+                    <span class="home-news-readmore">Читать полностью →</span>
+                </a>
+            </article>
+
+            {# ещё две новости плиткой #}
+            {% if public_posts|length > 1 %}
+                <div class="home-news-subgrid">
+                    {% for post in public_posts[1:3] %}
+                        <article class="news-card home-news-small-card">
+                            <a href="{{ url_for('news') }}#post-{{ post.id }}" class="home-news-clickable">
+                                <header class="home-news-header">
+                                    <h3 class="news-title">{{ post.title }}</h3>
+                                    <div class="news-meta">
+                                        <span class="news-date">{{ post.date|ru_date }}</span>
+                                        {% if post.category %}
+                                            <span class="news-category">{{ post.category }}</span>
+                                        {% endif %}
+                                    </div>
+                                </header>
+                                {% set txt = post.text or '' %}
+                                <p class="news-text-short">
+                                    {{ txt|truncate(140, True, '…') }}
+                                </p>
+                                <span class="home-news-readmore">Читать полностью →</span>
+                            </a>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            <div class="home-news-more">
+                {% if session.get('user') %}
+                    <a href="{{ url_for('news') }}" class="home-news-more-link">
+                        Все новости дома и района →
+                    </a>
+                {% else %}
+                    <a href="{{ url_for('login') }}" class="home-news-more-link">
+                        Войти, чтобы посмотреть все новости →
+                    </a>
+                {% endif %}
+            </div>
+        {% else %}
+            <p class="home-news-empty">Пока нет опубликованных публичных новостей.</p>
+        {% endif %}
+    </div>
+
+    <aside class="home-info-column">
+        <h2 class="sidebar-title">Полезная информация</h2>
+
+        {% if sidebar_items %}
+            <div class="sidebar-list">
+                {% for item in sidebar_items %}
+                    <section class="sidebar-card">
+                        <h3 class="sidebar-card-title">{{ item.title }}</h3>
+                        {% if item.text %}
+                            <p class="sidebar-card-text">{{ item.text }}</p>
+                        {% endif %}
+                        {% if item.links %}
+                            <div class="sidebar-links">
+                                {% for link in item.links %}
+                                    <a href="{{ link.url }}" target="_blank" class="sidebar-link">
+                                        {{ link.label }}
+                                    </a>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </section>
+                {% endfor %}
+            </div>
+            <a class="sidebar-more-link" href="{{ url_for('info') }}">
+                Все контакты и важная информация →
+            </a>
+        {% else %}
+            <p class="sidebar-empty">Пока нет записей.</p>
+        {% endif %}
+    </aside>
+</section>
+
+<section class="info-section">
+    <h2>Как устроено наше онлайн-общение</h2>
+    <div class="info-grid">
+        <div class="info-card">
+            <h3>Чаты дома</h3>
+            <p>Обсуждаем общедомовые вопросы, голосования, ремонт, коммунальные услуги.</p>
+        </div>
+        <div class="info-card">
+            <h3>Новости района</h3>
+            <p>На сайте публикуем объявления района, ярмарки, полезные инициативы.</p>
+        </div>
+        <div class="info-card">
+            <h3>Резервный канал</h3>
+            <p>Если мессенджеры временно недоступны, всегда можно зайти на сайт и посмотреть свежие объявления.</p>
+        </div>
+    </div>
+</section>
+{% endblock %}

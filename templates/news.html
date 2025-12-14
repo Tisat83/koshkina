@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+
+{% block title %}Новости | Мой дом на Кошкина{% endblock %}
+
+{% block content %}
+<section class="news-section">
+    <div class="news-layout">
+        <div class="news-main">
+            <div class="news-head-row">
+                <div>
+                    <h1>
+                        {% if is_archive_view %}
+                            Архив новостей
+                        {% else %}
+                            Новости дома и района
+                        {% endif %}
+                    </h1>
+                    <p class="news-intro">
+                        {% if is_archive_view %}
+                            Здесь собраны устаревшие и архивные объявления.
+                        {% else %}
+                            Здесь публикуются важные объявления по дому и новости района.
+                        {% endif %}
+                    </p>
+                </div>
+
+                <div class="news-head-actions">
+                    {% if not is_archive_view and has_archived %}
+                        <a class="btn-secondary btn-small" href="{{ url_for('news_archive') }}">
+                            Архив новостей
+                        </a>
+                    {% elif is_archive_view %}
+                        <a class="btn-secondary btn-small" href="{{ url_for('news') }}">
+                            К актуальным новостям
+                        </a>
+                    {% endif %}
+
+                    {% if is_admin %}
+                        <a class="btn-primary btn-small" href="{{ url_for('admin_news_new') }}">+ Новость</a>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if not is_archive_view %}
+                <div class="news-subscribe">
+                    <form method="post" class="news-subscribe-form">
+                        <span class="news-subscribe-label">Подписка на сайте:</span>
+                        <label>
+                            <input type="checkbox" name="sub_house" {% if user_subs.house %}checked{% endif %}>
+                            Новости дома
+                        </label>
+                        <label>
+                            <input type="checkbox" name="sub_district" {% if user_subs.district %}checked{% endif %}>
+                            Новости района
+                        </label>
+                        <button type="submit" class="btn-primary btn-small">Сохранить</button>
+                    </form>
+                    <p class="news-subscribe-note">
+                        Сейчас подписка влияет на выделение новостей в ленте.
+                    </p>
+                </div>
+            {% endif %}
+
+            <div class="news-list">
+                {% for post in posts %}
+                    {% set cat = post.category or '' %}
+                    {% set subscribed = (cat == 'Дом' and user_subs.house) or (cat == 'Район' and user_subs.district) %}
+                    <article class="news-card {% if subscribed %}news-card-subscribed{% endif %}" id="post-{{ post.id }}">
+                        <header>
+                            <div class="news-title-row">
+                                <h2 class="news-title">{{ post.title }}</h2>
+
+                                {% if is_admin %}
+                                    <div class="news-admin-actions">
+                                        <a class="btn-secondary btn-small"
+                                           href="{{ url_for('admin_news_edit', post_id=post.id) }}">
+                                            Редактировать
+                                        </a>
+                                        <form method="post"
+                                              action="{{ url_for('admin_news_delete', post_id=post.id) }}"
+                                              style="display:inline;">
+                                            <button class="btn-secondary btn-small"
+                                                    type="submit"
+                                                    onclick="return confirm('Удалить новость?')">
+                                                Удалить
+                                            </button>
+                                        </form>
+                                    </div>
+                                {% endif %}
+                            </div>
+
+                            <div class="news-meta">
+                                <span class="news-date">{{ post.date|ru_date }}</span>
+                                {% if post.category %}
+                                    <span class="news-category">{{ post.category }}</span>
+                                {% endif %}
+
+                                {% if post.source %}
+                                    {% for s in post.source %}
+                                        <span class="news-source">
+                                            {% if s == 'telegram' %}Telegram{% elif s == 'max' %}MAX{% else %}Сайт{% endif %}
+                                        </span>
+                                    {% endfor %}
+                                {% endif %}
+                            </div>
+
+                            {% if subscribed %}
+                                <span class="news-subscribed-pill">В вашей подписке</span>
+                            {% endif %}
+                        </header>
+
+                        {% if post.image %}
+                            <div class="news-image">
+                                <img class="js-lightbox"
+                                     src="{{ url_for('static', filename='img/' ~ post.image) }}"
+                                     alt="{{ post.title }}">
+                            </div>
+                        {% endif %}
+
+                        <div class="news-body">
+                            {% set text = post.text or '' %}
+                            <p class="news-text-short">
+                                {{ text|truncate(260, True, '…') }}
+                            </p>
+                            <div class="news-text-full">
+                                {{ text|replace('\n','<br>')|safe }}
+                            </div>
+
+                            {% if text|length > 260 %}
+                                <button type="button"
+                                        class="btn-secondary js-toggle-news"
+                                        data-post-id="{{ post.id }}">
+                                    Показать полностью
+                                </button>
+                            {% endif %}
+                        </div>
+
+                        {% if post.gallery %}
+                            <div class="news-gallery">
+                                {% for g in post.gallery %}
+                                    <img class="js-lightbox"
+                                         src="{{ url_for('static', filename='img/' ~ g) }}"
+                                         alt="">
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+
+                        <div class="reactions">
+                            {% set pid = post.id|string %}
+                            {% set post_reacts = reactions.get(pid, {}) %}
+                            {% set my = user_reactions.get(post.id) %}
+                            {% for emoji in reaction_emojis %}
+                                {% set cnt = (post_reacts.get(emoji, []) | length) %}
+                                <form method="post"
+                                      action="{{ url_for('react', post_id=post.id) }}">
+                                    <input type="hidden" name="emoji" value="{{ emoji }}">
+                                    <button type="submit"
+                                            class="reaction-btn {% if my == emoji %}is-active{% endif %}">
+                                        <span class="reaction-emoji">{{ emoji }}</span>
+                                        {% if cnt > 0 %}
+                                            <span class="reaction-count">{{ cnt }}</span>
+                                        {% endif %}
+                                    </button>
+                                </form>
+                            {% endfor %}
+                        </div>
+                    </article>
+                {% else %}
+                    <p class="home-news-empty">Пока нет новостей.</p>
+                {% endfor %}
+            </div>
+
+            {% if pagination.pages > 1 %}
+                <nav class="pagination">
+                    {% if pagination.page > 1 %}
+                        <a class="page-link"
+                           href="{{ url_for(pagination.endpoint, page=pagination.page-1) }}">
+                            ← Предыдущая
+                        </a>
+                    {% endif %}
+                    <span class="page-info">
+                        Страница {{ pagination.page }} из {{ pagination.pages }}
+                    </span>
+                    {% if pagination.page < pagination.pages %}
+                        <a class="page-link"
+                           href="{{ url_for(pagination.endpoint, page=pagination.page+1) }}">
+                            Следующая →
+                        </a>
+                    {% endif %}
+                </nav>
+            {% endif %}
+        </div>
+
+        <aside class="news-sidebar">
+            <h3 class="sidebar-title">Полезная информация</h3>
+
+            {% if sidebar_items %}
+                <div class="sidebar-list">
+                    {% for item in sidebar_items %}
+                        <section class="sidebar-card">
+                            <h4 class="sidebar-card-title">{{ item.title }}</h4>
+                            {% if item.text %}
+                                <p class="sidebar-card-text">{{ item.text }}</p>
+                            {% endif %}
+                            {% if item.links %}
+                                <div class="sidebar-links">
+                                    {% for link in item.links %}
+                                        <a href="{{ link.url }}" target="_blank" class="sidebar-link">
+                                            {{ link.label }}
+                                        </a>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </section>
+                    {% endfor %}
+                </div>
+                <a class="sidebar-more-link" href="{{ url_for('info') }}">
+                    Все контакты и важная информация →
+                </a>
+            {% else %}
+                <p class="sidebar-empty">Пока пусто.</p>
+            {% endif %}
+        </aside>
+    </div>
+</section>
+
+<script>
+(function () {
+    function toggleCard(postId) {
+        const card = document.getElementById('post-' + postId);
+        if (!card) return;
+
+        card.classList.toggle('expanded');
+
+        const btn = card.querySelector('.js-toggle-news');
+        if (btn) {
+            btn.textContent = card.classList.contains('expanded')
+                ? 'Скрыть'
+                : 'Показать полностью';
+        }
+    }
+
+    document.addEventListener('click', function (e) {
+        const btn = e.target.closest('.js-toggle-news');
+        if (!btn) return;
+        const id = btn.getAttribute('data-post-id');
+        if (!id) return;
+        toggleCard(id);
+    });
+})();
+</script>
+{% endblock %}

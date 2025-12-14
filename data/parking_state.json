@@ -1,0 +1,65 @@
+{
+  "spots": {
+    "4": {
+      "apartment": "",
+      "name": "Александр",
+      "car_code": "",
+      "phone": "",
+      "show_phone": true,
+      "until": "",
+      "long_term": true,
+      "updated_at": "2025-12-11T21:10",
+      "telegram_chat_id": "97280237"
+    },
+    "3": {
+      "apartment": "",
+      "name": "Александр",
+      "car_code": "",
+      "phone": "",
+      "show_phone": true,
+      "until": "",
+      "long_term": true,
+      "updated_at": "2025-12-11T21:10",
+      "telegram_chat_id": "97280237"
+    },
+    "9": {
+      "apartment": "гость",
+      "name": "Марина",
+      "car_code": "Р123ЙЙ",
+      "phone": "546766868",
+      "show_phone": true,
+      "until": "",
+      "long_term": false,
+      "updated_at": "2025-12-13T09:43",
+      "telegram_chat_id": "",
+      "is_guest": true
+    },
+    "10": {
+      "apartment": "гость",
+      "name": "Ку",
+      "car_code": "Юйх",
+      "phone": "54546688",
+      "show_phone": true,
+      "until": "",
+      "long_term": false,
+      "updated_at": "2025-12-13T19:48",
+      "telegram_chat_id": "",
+      "is_guest": true,
+      "guest_photo": "img/guest_photos/1765655295_IMG_9971.png"
+    },
+    "12": {
+      "apartment": "гость",
+      "name": "Валера",
+      "car_code": "634",
+      "phone": "79992223465",
+      "show_phone": true,
+      "until": "",
+      "long_term": false,
+      "updated_at": "2025-12-13T23:10",
+      "guest_photo": "img/guest_photos/1765667412_IMG_8849.jpeg",
+      "telegram_chat_id": "",
+      "is_guest": true
+    }
+  },
+  "subscriptions": {}
+}

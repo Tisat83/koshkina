@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8" />
+    <title>{% block title %}Мой дом на Кошкина{% endblock %}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+    <style>
+        .user-menu {
+            position: relative;
+            margin-left: 12px;
+        }
+        .user-menu-toggle {
+            border-radius: 999px;
+            border: 1px solid var(--border-color);
+            background: var(--chip-bg);
+            color: var(--text-color);
+            padding: 6px 12px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .user-menu-toggle:hover {
+            background: var(--nav-hover-bg);
+            border-color: var(--accent);
+        }
+        .user-menu-dropdown {
+            position: absolute;
+            right: 0;
+            top: 110%;
+            min-width: 140px;
+            background: var(--card-bg);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-soft);
+            padding: 6px 0;
+            display: none;
+            z-index: 1200;
+        }
+        .user-menu-dropdown a {
+            display: block;
+            padding: 6px 12px;
+            font-size: 13px;
+            text-decoration: none;
+            color: var(--text-color);
+        }
+        .user-menu-dropdown a:hover {
+            background: var(--nav-hover-bg);
+        }
+        .user-menu-dropdown.is-open {
+            display: block;
+        }
+    </style>
+    <style>
+        @media (max-width: 768px) {
+            /* спрятать текст логотипа на мобилке, оставить только иконку */
+            .logo-text {
+                display: none;
+            }
+        }
+    </style>
+</head>
+
+</head>
+<body>
+<header class="site-header">
+    <div class="container header-inner">
+        <div class="logo">
+            <a href="{{ url_for('index') }}" class="logo-link">
+                <span class="logo-mark">🏠</span>
+                <span class="logo-text">Мой дом на Кошкина</span>
+            </a>
+        </div>
+        <nav class="main-nav">
+            <a href="{{ url_for('index') }}">Главная</a>
+            {% if session.get('user') %}
+                <a href="{{ url_for('news') }}">Новости</a>
+
+                {% if session['user'].get('is_admin') %}
+                    <a href="{{ url_for('admin_news_new') }}">Добавить новость</a>
+                {% endif %}
+
+                <div class="user-menu">
+                    <button type="button" class="user-menu-toggle" id="userMenuToggle">
+                        {{ session['user'].get('name') or 'Житель' }}
+                    </button>
+                    <div class="user-menu-dropdown" id="userMenuDropdown">
+                        <a href="{{ url_for('profile') }}">Профиль</a>
+                        <a href="{{ url_for('logout') }}">Выйти</a>
+                    </div>
+                </div>
+            {% else %}
+                <a href="{{ url_for('login') }}" class="btn-link">Вход для жильцов</a>
+            {% endif %}
+
+            <!-- Переключатель темы -->
+            <button id="themeToggle" class="theme-toggle" type="button" aria-label="Переключить тему">
+                <span id="themeToggleIcon">🌙</span>
+            </button>
+        </nav>
+    </div>
+</header>
+
+<main class="site-main">
+    <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flash-container">
+                    {% for category, message in messages %}
+                        <div class="flash flash-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </div>
+</main>
+
+<footer class="site-footer">
+    <div class="container footer-inner">
+        <span>© {{ 2025 }} «Мой дом на Кошкина»</span>
+        <span class="footer-note">
+            Сайт для жильцов дома. Информация не является публичной офертой.
+        </span>
+        <a href="{{ url_for('news_archive') }}" class="footer-link">Архив новостей</a>
+    </div>
+</footer>
+
+<!-- Лайтбокс для увеличения изображений -->
+<div id="lightboxOverlay" class="lightbox">
+    <div class="lightbox-inner">
+        <button type="button" id="lightboxClose" class="lightbox-close" aria-label="Закрыть">×</button>
+        <img id="lightboxImage" src="" alt="">
+    </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const toggle = document.getElementById("userMenuToggle");
+    const dropdown = document.getElementById("userMenuDropdown");
+    if (!toggle || !dropdown) {
+        return;
+    }
+
+    function closeMenu() {
+        dropdown.classList.remove("is-open");
+    }
+
+    toggle.addEventListener("click", function (event) {
+        event.stopPropagation();
+        dropdown.classList.toggle("is-open");
+    });
+
+    document.addEventListener("click", function (event) {
+        if (!dropdown.classList.contains("is-open")) {
+            return;
+        }
+        if (!dropdown.contains(event.target) && event.target !== toggle) {
+            closeMenu();
+        }
+    });
+
+    window.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") {
+            closeMenu();
+        }
+    });
+});
+</script>
+<script src="{{ url_for('static', filename='js/theme.js') }}"></script>
+<script src="{{ url_for('static', filename='js/lightbox.js') }}"></script>
+</body>
+</html>

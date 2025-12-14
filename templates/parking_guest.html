@@ -1,0 +1,601 @@
+{% extends "base.html" %}
+
+{% block title %}Гостевая парковка | Мой дом на Кошкина{% endblock %}
+
+{% block content %}
+
+<style>
+    /* ----- Гостевая страница: доп. стили только здесь ----- */
+
+    .parking-guest h1 {
+        margin-bottom: 0.75rem;
+    }
+
+    .parking-guest .auth-description {
+        max-width: 720px;
+    }
+
+    .parking-guest-figure-card {
+        margin-top: 1.5rem;
+    }
+
+    .parking-guest-figure {
+        border-radius: 24px;
+        overflow: hidden;
+        background: #020617;
+        box-shadow: 0 18px 45px rgba(0, 0, 0, 0.55);
+    }
+
+    .parking-guest-image {
+        display: block;
+        width: 100%;
+        height: auto;
+        cursor: pointer;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .parking-guest-image:hover {
+        transform: scale(1.01);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+    }
+
+    .parking-guest-figure-note {
+        padding: 0.75rem 1rem 1rem;
+        font-size: 0.9rem;
+        opacity: 0.8;
+    }
+
+    .parking-guest-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-top: 1rem;
+    }
+
+    .parking-guest-actions .btn-primary,
+    .parking-guest-actions .btn-secondary {
+        flex: 1 1 220px;
+        justify-content: center;
+        text-align: center;
+    }
+
+    /* --- Модалка увеличения схемы --- */
+
+    .guest-image-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.9);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 2000;
+    }
+
+    .guest-image-modal-backdrop.is-open {
+        display: flex;
+    }
+
+    .guest-image-modal {
+        max-width: 100%;
+        max-height: 100%;
+        padding: 0.5rem;
+    }
+
+    .guest-image-modal img {
+        display: block;
+        max-width: 100vw;
+        max-height: 100vh;
+        height: auto;
+    }
+
+    .guest-image-modal-close {
+        position: fixed;
+        top: 12px;
+        right: 16px;
+        border: none;
+        border-radius: 999px;
+        padding: 6px 10px;
+        background: rgba(15, 23, 42, 0.9);
+        color: #f9fafb;
+        font-size: 1.4rem;
+        line-height: 1;
+        cursor: pointer;
+        z-index: 2001;
+    }
+
+    /* --- Полноэкранная форма гостя --- */
+
+    .guest-form-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.95);
+        display: none;
+        align-items: flex-start;
+        justify-content: center;
+        z-index: 2100;
+        overflow-y: auto;
+        padding: 1rem;
+    }
+
+    .guest-form-modal-backdrop.is-open {
+        display: flex;
+    }
+
+    .guest-form-modal {
+        width: 100%;
+        max-width: 480px;
+        margin-top: 0.5rem;
+        border-radius: 24px;
+        background: radial-gradient(circle at top, #111827 0, #020617 55%, #020617 100%);
+        box-shadow: 0 28px 80px rgba(0, 0, 0, 0.8);
+        padding: 1.25rem 1.25rem 1.5rem;
+        color: #e5e7eb;
+        position: relative;
+    }
+
+    .guest-form-modal h2 {
+        font-size: 1.35rem;
+        margin-bottom: 0.25rem;
+    }
+
+    .guest-form-modal p {
+        font-size: 0.9rem;
+        opacity: 0.85;
+        margin-bottom: 0.75rem;
+    }
+
+    .guest-form-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        margin-top: 0.5rem;
+    }
+
+    .guest-field-label {
+        font-size: 0.9rem;
+        margin-bottom: 0.25rem;
+        display: block;
+    }
+
+    .guest-input,
+    .guest-select,
+    .guest-textarea {
+        width: 100%;
+        border-radius: 12px;
+        border: 1px solid rgba(148, 163, 184, 0.6);
+        background: rgba(15, 23, 42, 0.9);
+        color: #f9fafb;
+        padding: 0.65rem 0.8rem;
+        font-size: 0.98rem;
+        outline: none;
+    }
+
+    .guest-input::placeholder,
+    .guest-textarea::placeholder {
+        color: rgba(148, 163, 184, 0.9);
+    }
+
+    .guest-input:focus,
+    .guest-select:focus,
+    .guest-textarea:focus {
+        border-color: rgba(96, 165, 250, 0.95);
+        box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.9);
+    }
+
+    .guest-textarea {
+        min-height: 80px;
+        resize: vertical;
+    }
+
+    .guest-helper {
+        font-size: 0.8rem;
+        opacity: 0.8;
+        margin-top: 0.15rem;
+    }
+
+    .guest-form-footer {
+        margin-top: 1.1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+
+    .guest-submit-row {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .guest-submit-row .btn-primary {
+        flex: 1 1 auto;
+        justify-content: center;
+    }
+
+    .guest-submit-row .btn-secondary {
+        flex: 0 0 auto;
+        padding-inline: 0.85rem;
+    }
+
+    .guest-form-modal-close {
+        position: absolute;
+        top: 10px;
+        right: 12px;
+        border: none;
+        border-radius: 999px;
+        padding: 4px 9px;
+        background: rgba(15, 23, 42, 0.85);
+        color: #e5e7eb;
+        font-size: 1.3rem;
+        line-height: 1;
+        cursor: pointer;
+    }
+
+    .guest-file-input {
+        padding: 0.4rem 0.8rem;
+        background: rgba(15, 23, 42, 0.9);
+        color: #e5e7eb;
+        border-radius: 999px;
+        border: 1px dashed rgba(148, 163, 184, 0.7);
+        font-size: 0.8rem;
+        cursor: pointer;
+    }
+
+    .guest-file-input::-webkit-file-upload-button {
+        visibility: hidden;
+    }
+
+    .guest-file-input::before {
+        content: "Выбрать файл";
+        display: inline-block;
+        padding: 0.3rem 0.7rem;
+        margin-right: 0.25rem;
+        border-radius: 999px;
+        background: rgba(37, 99, 235, 0.95);
+        color: #f9fafb;
+        font-size: 0.8rem;
+    }
+
+    @media (max-width: 640px) {
+        .guest-form-modal {
+            margin-top: 0.5rem;
+            border-radius: 0.75rem;
+            padding-inline: 1rem;
+        }
+
+        .guest-form-modal h2 {
+            font-size: 1.2rem;
+        }
+
+        .guest-input,
+        .guest-select,
+        .guest-textarea {
+            font-size: 1rem;
+        }
+    }
+</style>
+
+<section class="info-section parking-section parking-guest">
+    <h1>Гостевая парковка у дома</h1>
+
+    <p class="auth-description">
+        Эта страница для гостей, которые временно паркуются во дворе.
+        Здесь можно посмотреть схему парковки и оставить заявку на место,
+        чтобы не мешать жильцам дома.
+    </p>
+
+    <div class="info-cards-grid">
+        <article class="info-card parking-guest-figure-card">
+            <h2>Схема парковки — перед подъездами</h2>
+
+            <div class="parking-guest-figure">
+                <img
+                    src="{{ url_for('static', filename='img/parking_top_guest.png') }}"
+                    alt="Схема парковки для гостей"
+                    class="parking-guest-image"
+                    id="guestParkingImage"
+                >
+            </div>
+            <p class="parking-guest-figure-note">
+                Нажмите на схему, чтобы открыть её в полный экран. На месте 9–12 машины могут
+                перекрывать другие — обязательно оставьте номер телефона.
+            </p>
+        </article>
+
+        <article class="info-card">
+            <h2>Как пользоваться гостевой парковкой</h2>
+            <ul class="info-list">
+                <li>Не занимайте места, где стоят предупреждающие знаки.</li>
+                <li>Места 1–8 &mdash; обычные. Они часто заняты жильцами дома.</li>
+                <li>Места 9–12 &mdash; перекрывающие. Там обязательно нужно оставлять номер телефона.</li>
+                <li>Если вы перекрыли машину, старайтесь подъехать, как только вас попросят.</li>
+            </ul>
+        </article>
+
+        <article class="info-card" id="guest-actions">
+            <h2>Хотите припарковаться?</h2>
+            <p class="auth-description">
+                Для оформления гостевой парковки нужно указать ваши контакты и номер машины.
+                Это нужно, чтобы мы могли связаться с вами, если вы кого-то перекрыли.
+            </p>
+
+            <div class="parking-guest-actions">
+                <a
+                    href="{{ telegram_bot_url or '#' }}"
+                    class="btn-primary"
+                    target="_blank"
+                    rel="noopener"
+                >
+                    Продолжить через Telegram
+                </a>
+
+                <button type="button" class="btn-secondary" data-guest-form-open>
+                    Продолжить через сайт
+                </button>
+            </div>
+
+            <p class="auth-hint">
+                Через Telegram обычно быстрее: бот сам подскажет шаги и отправит уведомления.
+                Через сайт заявка попадёт администратору дома на ручное подтверждение.
+            </p>
+        </article>
+    </div>
+</section>
+
+<!-- Модалка с увеличенной схемой -->
+<div class="guest-image-modal-backdrop" id="guestImageModal">
+    <button type="button" class="guest-image-modal-close" id="guestImageModalClose">&times;</button>
+    <div class="guest-image-modal">
+        <img
+            src="{{ url_for('static', filename='img/parking_top_guest.png') }}"
+            alt="Схема парковки крупным планом"
+        >
+    </div>
+</div>
+
+<!-- Полноэкранная форма гостя -->
+<div class="guest-form-modal-backdrop" id="guestFormModal">
+    <div class="guest-form-modal">
+        <button type="button" class="guest-form-modal-close" id="guestFormModalClose">&times;</button>
+
+        <h2>Заявка через сайт</h2>
+        <p>
+            Укажите ваши данные и примерное место, куда вы припарковались.
+            Администратор дома получит заявку и подтвердит её, если вы действительно
+            стоите во дворе.
+        </p>
+
+        <form
+    id="guestSiteForm"
+    method="post"
+    action="{{ url_for('parking_guest_register') }}"
+    class="guest-form"
+    enctype="multipart/form-data"
+>
+
+            <div class="guest-form-grid">
+                <div>
+                    <label class="guest-field-label" for="guest-name">Имя</label>
+                    <input
+                        id="guest-name"
+                        name="name"
+                        type="text"
+                        class="guest-input"
+                        placeholder="Как к вам обращаться"
+                        required
+                    >
+                </div>
+
+                <div>
+                    <label class="guest-field-label" for="guest-phone">Телефон</label>
+                    <input
+                        id="guest-phone"
+                        name="phone"
+                        type="tel"
+                        class="guest-input"
+                        placeholder="+7..."
+                        required
+                    >
+                    <div class="guest-helper">
+                        По этому номеру с вами свяжется администратор или жильцы, если вы кого-то перекрыли.
+                    </div>
+                </div>
+
+                <div>
+                    <label class="guest-field-label" for="guest-car">Номер машины</label>
+                    <input
+                        id="guest-car"
+                        name="car_number"
+                        type="text"
+                        class="guest-input"
+                        placeholder="Например: C070ET197"
+                        required
+                    >
+                </div>
+
+                <div>
+                    <label class="guest-field-label" for="guest-spot">Место на схеме (1–12)</label>
+                    {% set disabled_spots = disabled_spots or [] %}
+                    <select
+                        id="guest-spot"
+                        name="spot_id"
+                        class="guest-select"
+                        required
+                    >
+                        <option value="" disabled selected>Выберите место</option>
+                        {% for spot in range(1, 13) %}
+                            {% set disabled = (spot|string) in disabled_spots %}
+                            <option value="{{ spot }}" {% if disabled %}disabled{% endif %}>
+                                Место {{ spot }}{% if disabled %} — занято{% endif %}
+                            </option>
+                        {% endfor %}
+                    </select>
+                    <div class="guest-helper">
+                        Места, которые уже заняты, автоматически отключены.
+                    </div>
+                </div>
+
+                <div>
+                    <label class="guest-field-label" for="guest-until">До какого времени планируете стоять</label>
+                    <input
+                        id="guest-until"
+                        name="until"
+                        type="datetime-local"
+                        class="guest-input"
+                    >
+                    <div class="guest-helper">
+                        Можно указать примерное время, чтобы жильцы понимали, надолго ли вы.
+                    </div>
+                </div>
+
+                <div>
+                    <label class="guest-field-label" for="guest-comment">Комментарий (необязательно)</label>
+                    <textarea
+                        id="guest-comment"
+                        name="comment"
+                        class="guest-textarea"
+                        placeholder="Например: стою у 1 подъезда, перекрыл серебристый седан"
+                    ></textarea>
+                </div>
+
+                <div>
+                    <span class="guest-field-label">Фото машины (необязательно)</span>
+                    <input
+                        type="file"
+                        name="photo"
+                        accept="image/*"
+                        class="guest-file-input"
+                    >
+                    <div class="guest-helper">
+                        Можно прикрепить фото машины или места — это поможет быстрее вас найти.
+                        (Сейчас файл просто отправляется вместе с формой; обработку сделаем на следующем шаге.)
+                    </div>
+                </div>
+            </div>
+
+            <div class="guest-form-footer">
+                <div class="guest-submit-row">
+                    <button type="submit" class="btn-primary">
+                        Отправить заявку
+                    </button>
+                    <button type="button" class="btn-secondary" id="guestFormCancel">
+                        Отмена
+                    </button>
+                </div>
+
+                <div class="guest-helper">
+                    После одобрения заявки администратором вам будет проще бронировать места
+                    в следующий раз.
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", () => {
+        // Увеличение схемы
+        const img = document.getElementById("guestParkingImage");
+        const imageModal = document.getElementById("guestImageModal");
+        const imageModalClose = document.getElementById("guestImageModalClose");
+
+        if (img && imageModal) {
+            img.addEventListener("click", () => {
+                imageModal.classList.add("is-open");
+            });
+
+            imageModal.addEventListener("click", (evt) => {
+                if (evt.target === imageModal) {
+                    imageModal.classList.remove("is-open");
+                }
+            });
+
+            if (imageModalClose) {
+                imageModalClose.addEventListener("click", () => {
+                    imageModal.classList.remove("is-open");
+                });
+            }
+        }
+
+        // Полноэкранная форма
+        const formModal = document.getElementById("guestFormModal");
+        const openFormBtn = document.querySelector("[data-guest-form-open]");
+        const closeFormBtn = document.getElementById("guestFormModalClose");
+        const cancelFormBtn = document.getElementById("guestFormCancel");
+
+        function openForm() {
+            if (!formModal) return;
+            formModal.classList.add("is-open");
+            document.body.style.overflow = "hidden";
+        }
+
+        function closeForm() {
+            if (!formModal) return;
+            formModal.classList.remove("is-open");
+            document.body.style.overflow = "";
+        }
+
+        if (openFormBtn) {
+            openFormBtn.addEventListener("click", (e) => {
+                e.preventDefault();
+                openForm();
+            });
+        }
+
+        if (closeFormBtn) {
+            closeFormBtn.addEventListener("click", (e) => {
+                e.preventDefault();
+                closeForm();
+            });
+        }
+
+        if (cancelFormBtn) {
+            cancelFormBtn.addEventListener("click", (e) => {
+                e.preventDefault();
+                closeForm();
+            });
+        }
+
+                if (formModal) {
+            formModal.addEventListener("click", (evt) => {
+                if (evt.target === formModal) {
+                    closeForm();
+                }
+            });
+        }
+
+        // --- Отправка формы через fetch, без перехода на JSON-страницу ---
+        const guestForm = document.getElementById("guestSiteForm");
+        if (guestForm) {
+            guestForm.addEventListener("submit", async (e) => {
+                e.preventDefault();
+
+                const formData = new FormData(guestForm);
+
+                try {
+                    const resp = await fetch(guestForm.action, {
+                        method: "POST",
+                        body: formData,
+                    });
+
+                    const data = await resp.json();
+
+                    if (data && data.ok) {
+                        alert(
+                            "Заявка отправлена. Администратор получит уведомление " +
+                            "и проверит, что вы действительно припарковались во дворе."
+                        );
+                        guestForm.reset();
+                        closeForm();
+                    } else {
+                        alert("Не удалось отправить заявку. Попробуйте ещё раз чуть позже.");
+                    }
+                } catch (err) {
+                    console.error(err);
+                    alert("Произошла ошибка при отправке. Попробуйте ещё раз.");
+                }
+            });
+        }
+    });
+</script>
+
+
+{% endblock %}

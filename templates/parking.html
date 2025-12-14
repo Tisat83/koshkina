@@ -1,0 +1,1473 @@
+{% extends "base.html" %}
+
+{% block title %}Парковка двора | Мой дом на Кошкина{% endblock %}
+
+{% block content %}
+<section
+    class="info-section parking-section"
+    id="parking-root"
+    data-user-apartment="{{ user.get('apartment', '') }}"
+    data-user-is-admin="{{ '1' if user.get('is_admin') else '0' }}"
+    data-user-phone="{{ user.get('phone', '') }}"
+    data-user-car-number="{{ user.get('car_code') or user.get('car_number', '') }}"
+    data-user-can-subscribe="1"
+>
+
+    <h1>Парковка двора</h1>
+    <p class="auth-description">
+        Здесь интерактивная схема парковки нашего двора. Можно выбирать
+        место на картинке (по номеру машинки) или в списке ниже, занимать
+        его и указывать время стоянки и контакт для связи.
+    </p>
+
+    <style>
+        .parking-layout {
+            margin-top: 12px; /* только отступ, без flex */
+        }
+
+        .parking-figure {
+            margin: 0;
+        }
+
+        .parking-figure figcaption {
+            font-size: 14px;
+            margin-bottom: 6px;
+            color: var(--muted-text);
+        }
+
+        .parking-figure > img {
+            display: block;
+            width: 100%;
+            max-width: 100%;
+            border-radius: 16px;
+            box-shadow: var(--shadow-soft);
+        }
+
+        .parking-figure-top .parking-image-wrapper {
+            position: relative;
+        }
+
+        .parking-map-bg {
+            display: block;
+            width: 100%;
+            max-width: 100%;
+            border-radius: 16px;
+            box-shadow: var(--shadow-soft);
+        }
+
+/* Картинка ПАРКОВОЧНОГО МЕСТА (P) — всегда видна */
+.parking-hotspot-img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 12px;
+    box-shadow: none;   /* 0 0 0 1px rgba(15, 23, 42, 0.07) убрали тень */
+    transition:
+        box-shadow 0.12s ease,
+        opacity 0.12s ease;
+}
+
+/* Машинка меньше слота и по центру */
+.parking-hotspot-car {
+    position: absolute;
+    left: 50%;
+    top: 200%;                                /* чуть ниже центра, можно подправить */
+    transform: translate(-50%, -50%);
+    width: 80% !important;                   /* ВОТ ЗДЕСЬ регулируется размер машинки */
+    height: auto;
+    border-radius: 999px;
+    box-shadow: none;
+    display: none !important;
+    pointer-events: none;
+}
+
+/* если занято / надолго — показываем машинку */
+.parking-hotspot--occupied .parking-hotspot-car,
+.parking-hotspot--long-term .parking-hotspot-car {
+    display: block !important;
+}
+
+
+/* Номер машинки поверх */
+.parking-hotspot-label {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 600;
+    /* тёмный текст, чтобы читался на светлой машине */
+    color: #111827;
+    text-shadow: 0 0 2px rgba(255, 255, 255, 0.8);
+    pointer-events: none;
+    /* для 1–8 — чуть ниже центра, ближе к окну */
+    transform: translateY(9px);
+}
+
+/* общее наведение — мягкая синяя подсветка, без поворота */
+/* Подсветка слота только для свободных мест */
+.parking-hotspot:not(.parking-hotspot--occupied):not(.parking-hotspot--long-term):hover
+.parking-hotspot-img {
+    box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.7);
+}
+
+/* Значки-подсказки на схеме */
+.parking-marker {
+    position: absolute;
+    border: none;
+    padding: 0;
+    background: transparent;
+    width: 32px;
+    height: 32px;
+    transform: translate(-50%, -50%);
+    cursor: pointer;
+    z-index: 5;
+
+    /* убираем «круглую кнопку» из базовых стилей */
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.parking-marker:focus {
+    outline: none;
+}
+
+.parking-marker-img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: transparent;
+}
+
+/* чтобы машинки были поверх значков */
+.parking-hotspot {
+    position: absolute;
+    border: none;
+    padding: 0;
+    background: transparent;
+    width: 65px; /* твои актуальные значения */
+    height: 30px;
+    transform: translate(-50%, -50%);
+    cursor: pointer;
+    z-index: 10;
+}
+
+.parking-hotspot--blocking {
+    width: 90px;
+    height: 30px;
+}
+
+/* Перекрывающие 9–12: поворачиваем МАШИНУ, не слот */
+.parking-hotspot--blocking .parking-hotspot-car {
+	top: 86%;
+    width: 56% !important;   /* поменьше, подгони по вкусу */
+    transform: translate(-50%, -50%) rotate(-90deg) !important;
+}
+
+/* Наведение: поворот сохраняем, подсветка остаётся на слоте через общее правило hover */
+.parking-hotspot--blocking:hover .parking-hotspot-car {
+    transform: rotate(-90deg);
+}
+
+
+/* Цифры на перекрывающих — смещаем ближе к "заднему" стеклу */
+.parking-hotspot--blocking .parking-hotspot-label {
+    transform: translate(-35px, 10px);
+}
+
+
+        .parking-spots {
+            margin-top: 24px;
+            background: var(--card-bg);
+            border-radius: 14px;
+            border: 1px solid var(--border-color);
+            padding: 14px 16px;
+        }
+        .parking-spots-title {
+            margin: 0 0 8px;
+            font-size: 16px;
+        }
+        .parking-spots-note {
+            margin: 0 0 12px;
+            font-size: 13px;
+            color: var(--muted-text);
+        }
+        .parking-spots-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 10px;
+        }
+
+        .parking-spot-card {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .parking-spot-card-title {
+            font-size: 13px;
+            color: var(--muted-text-2);
+        }
+
+        .parking-spot-btn {
+            width: 100%;
+            border-radius: 999px;
+            border: 1px solid var(--border-color);
+            background: var(--chip-bg);
+            padding: 6px 10px;
+            font-size: 13px;
+            cursor: pointer;
+            text-align: center;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 32px;
+            transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease, box-shadow 0.05s ease;
+        }
+        .parking-spot-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
+        }
+
+        .parking-spot-status {
+            display: block;
+            line-height: 1.25;
+        }
+
+        .parking-spot-btn--free {
+            border-color: #22c55e;
+            background: rgba(22, 163, 74, 0.1);
+            color: #bbf7d0;
+        }
+
+        .parking-spot-btn--busy {
+            border-color: #3b82f6;
+            background: rgba(37, 99, 235, 0.09);
+            color: #bfdbfe;
+        }
+
+        .parking-spot-btn--long {
+            border-color: #020617;
+            background: rgba(15, 23, 42, 0.9);
+            color: #e5e7eb;
+        }
+
+        .parking-spots-group-title {
+            font-size: 14px;
+            margin: 16px 0 6px;
+            color: var(--muted-text-2);
+        }
+
+        @media (max-width: 768px) {
+            .parking-layout {
+                margin-top: 12px;
+            }
+        }
+
+
+
+/* Фуллскрин карта парковки — без изменения масштаба картинки */
+.parking-layout-fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: #020617;
+    padding-top: 8px;
+    overflow: auto;              /* даём прокручивать, не режем высоту */
+}
+
+/* просто растягиваем фигуру по ширине, как в обычном режиме */
+.parking-layout-fullscreen .parking-figure-top {
+    max-width: 100%;
+    margin: 0;
+}
+
+/* На мобильных в режиме "Карта" увеличиваем ВСЮ схему (фон + машинки + цифры) */
+@media (max-width: 768px) {
+    .parking-layout-fullscreen .parking-figure-top {
+        max-width: none;
+        width: 100%;              /* сама фигура во всю ширину */
+    }
+
+    .parking-layout-fullscreen .parking-image-wrapper {
+        overflow: visible;
+        transform: scale(1.35);   /* степень "зума" — можно 1.2–1.5 по вкусу */
+        transform-origin: top left;
+    }
+}
+
+
+/* ничего не меняем у image-wrapper и img,
+   чтобы сохранялся прежний масштаб и позиции хотспотов */
+
+
+/* Кнопка "развернуть карту" */
+.parking-fullscreen-toggle {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 20;
+    border: none;
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(15, 23, 42, 0.9);
+    color: #e5e7eb;
+    cursor: pointer;
+}
+
+.parking-fullscreen-toggle .icon-collapse {
+    display: none;
+}
+
+.parking-fullscreen-toggle.is-active .icon-expand {
+    display: none;
+}
+
+.parking-fullscreen-toggle.is-active .icon-collapse {
+    display: inline;
+}
+
+/* на десктопе кнопку не показываем */
+@media (min-width: 769px) {
+    .parking-fullscreen-toggle {
+        display: none;
+    }
+}
+
+/* Мобильная версия: отдельные размеры для 1–8 и 9–12 */
+@media (max-width: 640px) {
+    /* слот 1–8 */
+    .parking-hotspot {
+        width: 27px;
+        height: 13px;
+    }
+
+    /* слот 9–12 — чуть длиннее и шире */
+    .parking-hotspot.parking-hotspot--blocking {
+        width: 34px;
+        height: 16px;
+    }
+
+    /* машинка 1–8 — меньше и ближе к центру слота */
+    .parking-hotspot-car {
+        top: 175%;
+        width: 65% !important;
+    }
+
+    /* машинка 9–12 — ещё компактнее и чуть выше */
+    .parking-hotspot.parking-hotspot--blocking .parking-hotspot-car {
+        top: 75%;
+        width: 50% !important;
+    }
+
+    /* цифры чуть поменьше и пониже */
+    .parking-hotspot-label {
+        font-size: 9px;
+        transform: translateY(4px);
+    }
+	    /* На мобильной цифры 9–12 поднимаем чуть выше */
+    .parking-hotspot.parking-hotspot--blocking .parking-hotspot-label {
+        transform: translate(-11px, 4px);
+    }
+
+	/* ↓↓↓ уменьшение значков на мобилке ↓↓↓ */
+    .parking-marker {
+        width: 14px;
+        height: 14px;
+    }
+
+    .parking-marker-img {
+        width: 100%;
+        height: auto;
+    }
+}
+
+
+        /* Модалка */
+
+        .parking-modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.55);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1500;
+            padding: 16px;
+        }
+
+        .parking-modal-backdrop.is-open {
+            display: flex;
+        }
+
+        .parking-modal {
+            max-width: 380px;
+            width: 100%;
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 16px 18px;
+            border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-soft);
+            font-size: 14px;
+        }
+
+        .parking-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .parking-modal-title {
+            margin: 0;
+            font-size: 16px;
+        }
+
+        .parking-modal-close {
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 18px;
+            line-height: 1;
+            padding: 0 4px;
+        }
+
+        .parking-modal-body {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .parking-modal-row {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        .parking-modal-owner-photo {
+            margin-top: 6px;
+        }
+
+        .parking-modal-owner-photo img {
+            max-width: 100%;
+            border-radius: 8px;
+            display: block;
+            cursor: pointer;
+        }
+
+        .parking-modal-label {
+            font-size: 12px;
+            color: var(--muted-text);
+        }
+
+        .parking-modal-input,
+        .parking-modal-input[type="datetime-local"] {
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            padding: 6px 8px;
+            background: transparent;
+            color: var(--text-color);
+            font-size: 13px;
+        }
+
+        .parking-modal-input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 1px rgba(75, 107, 255, 0.2);
+        }
+
+        .parking-modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 4px;
+        }
+
+        .parking-btn {
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-size: 13px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            background: var(--chip-bg);
+        }
+
+        .parking-btn-primary {
+            background: var(--accent);
+            color: #ffffff;
+            border-color: var(--accent);
+        }
+
+        .parking-btn-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .parking-btn-secondary {
+    border-color: rgba(148, 163, 184, 0.7);
+    color: #e5e7eb;
+    background: transparent;
+}
+
+.parking-btn-secondary:hover {
+    background: rgba(148, 163, 184, 0.08);
+}
+
+        .parking-btn-danger {
+            border-color: #b91c1c;
+            color: #fee2e2;
+            background: #7f1d1d;
+        }
+
+        .parking-modal-hint {
+            font-size: 12px;
+            color: var(--muted-text-2);
+        }
+
+        .parking-modal-error {
+            font-size: 12px;
+            color: #f87171;
+            display: none;
+        }
+
+        .parking-modal-error.is-visible {
+            display: block;
+        }
+		
+
+/* Занято / надолго — подсвечиваем МАШИНКУ только при наведении */
+.parking-hotspot--occupied:hover .parking-hotspot-car,
+.parking-hotspot--occupied-other:hover .parking-hotspot-car {
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.95) !important;
+}
+
+.parking-hotspot--long-term:hover .parking-hotspot-car {
+    box-shadow:
+        0 0 0 1px #3b2f2a,
+        0 0 0 3px rgba(75, 56, 35, 0.45) !important;
+}
+.parking-modal-owner-photo {
+    margin-top: 8px;
+}
+
+
+    </style>
+
+    <!-- ВЕРХНЯЯ КАРТА (во всю ширину секции) -->
+    <div class="parking-layout">
+        <figure class="parking-figure parking-figure-top">
+            <figcaption>Схема парковки — перед подъездами</figcaption>
+            <div class="parking-image-wrapper">
+
+                <!-- Кнопка фуллскрина карты (видна только на мобилке) -->
+                <button type="button"
+                        id="parkingFullscreenToggle"
+                        class="parking-fullscreen-toggle"
+                        aria-pressed="false">
+                    <span class="icon-expand">⤢</span>
+                    <span class="icon-collapse">✕</span>
+                    Zoom
+                </button>
+
+                <!-- Фон карты -->
+                <img src="{{ url_for('static', filename='img/parking_top.png') }}"
+                     alt="Схема парковки, верхняя часть"
+                     class="parking-map-bg">
+
+                <!-- Значки-подсказки -->
+                <!-- крестики: "не паркуемся" -->
+                <button
+                    class="parking-marker"
+                    data-message="В данных местах не паркуемся, чтоб не ограничивать движение!"
+                    style="top: 24%; left: 25.5%;">
+                    <img src="{{ url_for('static', filename='img/parking_sign_nopark.png') }}"
+                         alt="Здесь не паркуемся"
+                         class="parking-marker-img">
+                </button>
+
+                <button
+                    class="parking-marker"
+                    data-message="В данных местах не паркуемся, чтоб не ограничивать движение!"
+                    style="top: 70%; left: 22%;">
+                    <img src="{{ url_for('static', filename='img/parking_sign_nopark.png') }}"
+                         alt="Здесь не паркуемся"
+                         class="parking-marker-img">
+                </button>
+
+                <button
+                    class="parking-marker"
+                    data-message="Внимательно паркуйтесь в данных местах!"
+                    style="top: 67%; left: 7%;">
+                    <img src="{{ url_for('static', filename='img/parking_sign_warning.png') }}"
+                         alt="Внимательно паркуйтесь"
+                         class="parking-marker-img">
+                </button>
+
+                <!-- восклицательные: "внимательно паркуемся" -->
+                <button
+                    class="parking-marker"
+                    data-message="Внимательно паркуйтесь в данных местах"
+                    style="top: 40%; left: 25%;">
+                    <img src="{{ url_for('static', filename='img/parking_sign_warning.png') }}"
+                         alt="Внимательно паркуйтесь"
+                         class="parking-marker-img">
+                </button>
+
+                <button
+                    class="parking-marker"
+                    data-message="Внимательно паркуйтесь в данных местах"
+                    style="top: 29%; left: 74%;">
+                    <img src="{{ url_for('static', filename='img/parking_sign_warning.png') }}"
+                         alt="Внимательно паркуйтесь"
+                         class="parking-marker-img">
+                </button>
+
+                <!-- Обычные места 1–8 -->
+                <button class="parking-hotspot"
+                        data-spot-id="1" data-spot-label="1" data-spot-type="regular"
+                        style="top: 24%; left: 21.2%;">
+                    <img src="{{ url_for('static', filename='img/parking_slot_regular.png') }}"
+                         alt="Место 1"
+                         class="parking-hotspot-img">
+                    <img src="{{ url_for('static', filename='img/parking_car_regular.png') }}"
+                         alt="Авто на месте 1"
+                         class="parking-hotspot-car">
+                    <span class="parking-hotspot-label">1</span>
+                </button>
+
+                <button class="parking-hotspot"
+                        data-spot-id="2" data-spot-label="2" data-spot-type="regular"
+                        style="top: 18%; left: 30.1%;">
+                    <img src="{{ url_for('static', filename='img/parking_slot_regular.png') }}"
+                         alt="Место 2"
+                         class="parking-hotspot-img">
+                    <img src="{{ url_for('static', filename='img/parking_car_regular.png') }}"
+                         alt="Авто на месте 2"
+                         class="parking-hotspot-car">
+                    <span class="parking-hotspot-label">2</span>
+                </button>
+
+                <button class="parking-hotspot"
+                        data-spot-id="3" data-spot-label="3" data-spot-type="regular"
+                        style="top: 18%; left: 36%;">
+                    <img src="{{ url_for('static', filename='img/parking_slot_regular.png') }}"
+                         alt="Место 3"
+                         class="parking-hotspot-img">
+                    <img src="{{ url_for('static', filename='img/parking_car_regular.png') }}"
+                         alt="Авто на месте 3"
+                         class="parking-hotspot-car">
+                    <span class="parking-hotspot-label">3</span>
+                </button>
+
+                <button class="parking-hotspot"
+                        data-spot-id="4" data-spot-label="4" data-spot-type="regular"
+                        style="top: 18%; left: 41.9%;">
+                    <img src="{{ url_for('static', filename='img/parking_slot_regular.png') }}"
+                         alt="Место 4"
+                         class="parking-hotspot-img">
+                    <img src="{{ url_for('static', filename='img/parking_car_regular.png') }}"
+                         alt="Авто на месте 4"
+                         class="parking-hotspot-car">
+                    <span class="parking-hotspot-label">4</span>
+                </button>
+
+                <button class="parking-hotspot"
+                        data-spot-id="5" data-spot-label="5" data-spot-type="regular"
+                        style="top: 18%; left: 49.8%;">
+                    <img src="{{ url_for('static', filename='img/parking_slot_regular.png') }}"
+                         alt="Место 5"
+                         class="parking-hotspot-img">
+                    <img src="{{ url_for('static', filename='img/parking_car_regular.png') }}"
+                         alt="Авто на месте 5"
+                         class="parking-hotspot-car">
+                    <span class="parking-hotspot-label">5</span>
+                </button>
+
+                <button class="parking-hotspot"
+                        data-spot-id="6" data-spot-label="6" data-spot-type="regular"
+                        style="top: 18%; left: 55.8%;">
+                    <img src="{{ url_for('static', filename='img/parking_slot_regular.png') }}"
+                         alt="Место 6"
+                         class="parking-hotspot-img">
+                    <img src="{{ url_for('static', filename='img/parking_car_regular.png') }}"
+                         alt="Авто на месте 6"
+                         class="parking-hotspot-car">
+                    <span class="parking-hotspot-label">6</span>
+                </button>
+
+                <button class="parking-hotspot"
+                        data-spot-id="7" data-spot-label="7" data-spot-type="regular"
+                        style="top: 18%; left: 62%;">
+                    <img src="{{ url_for('static', filename='img/parking_slot_regular.png') }}"
+                         alt="Место 7"
+                         class="parking-hotspot-img">
+                    <img src="{{ url_for('static', filename='img/parking_car_regular.png') }}"
+                         alt="Авто на месте 7"
+                         class="parking-hotspot-car">
+                    <span class="parking-hotspot-label">7</span>
+                </button>
+
+                <button class="parking-hotspot"
+                        data-spot-id="8" data-spot-label="8" data-spot-type="regular"
+                        style="top: 18%; left: 68%;">
+                    <img src="{{ url_for('static', filename='img/parking_slot_regular.png') }}"
+                         alt="Место 8"
+                         class="parking-hotspot-img">
+                    <img src="{{ url_for('static', filename='img/parking_car_regular.png') }}"
+                         alt="Авто на месте 8"
+                         class="parking-hotspot-car">
+                    <span class="parking-hotspot-label">8</span>
+                </button>
+
+                <!-- Перекрывающие места 9–12 -->
+                <button class="parking-hotspot parking-hotspot--blocking"
+                        data-spot-id="9" data-spot-label="9" data-spot-type="blocking"
+                        style="top: 40%; left: 35%;">
+                    <img src="{{ url_for('static', filename='img/parking_slot_blocking.png') }}"
+                         alt="Место 9"
+                         class="parking-hotspot-img">
+                    <img src="{{ url_for('static', filename='img/parking_car_blocking.png') }}"
+                         alt="Авто на месте 9"
+                         class="parking-hotspot-car">
+                    <span class="parking-hotspot-label">9</span>
+                </button>
+
+                <button class="parking-hotspot parking-hotspot--blocking"
+                        data-spot-id="10" data-spot-label="10" data-spot-type="blocking"
+                        style="top: 40%; left: 48%;">
+                    <img src="{{ url_for('static', filename='img/parking_slot_blocking.png') }}"
+                         alt="Место 10"
+                         class="parking-hotspot-img">
+                    <img src="{{ url_for('static', filename='img/parking_car_blocking.png') }}"
+                         alt="Авто на месте 10"
+                         class="parking-hotspot-car">
+                    <span class="parking-hotspot-label">10</span>
+                </button>
+
+                <button class="parking-hotspot parking-hotspot--blocking"
+                        data-spot-id="11" data-spot-label="11" data-spot-type="blocking"
+                        style="top: 40%; left: 62%;">
+                    <img src="{{ url_for('static', filename='img/parking_slot_blocking.png') }}"
+                         alt="Место 11"
+                         class="parking-hotspot-img">
+                    <img src="{{ url_for('static', filename='img/parking_car_blocking.png') }}"
+                         alt="Авто на месте 11"
+                         class="parking-hotspot-car">
+                    <span class="parking-hotspot-label">11</span>
+                </button>
+
+                <button class="parking-hotspot parking-hotspot--blocking"
+                        data-spot-id="12" data-spot-label="12" data-spot-type="blocking"
+                        style="top: 40%; left: 75%;">
+                    <img src="{{ url_for('static', filename='img/parking_slot_blocking.png') }}"
+                         alt="Место 12"
+                         class="parking-hotspot-img">
+                    <img src="{{ url_for('static', filename='img/parking_car_blocking.png') }}"
+                         alt="Авто на месте 12"
+                         class="parking-hotspot-car">
+                    <span class="parking-hotspot-label">12</span>
+                </button>
+
+            </div>
+
+        </figure>
+    </div>
+
+    <!-- БЛОК С МЕСТАМИ -->
+    <div class="parking-spots">
+        <h2 class="parking-spots-title">Места на парковке</h2>
+        <p class="parking-spots-note">
+            Можно нажать на машинку на схеме или выбрать место в списке ниже.
+            Занятое место подсвечивается, при клике видно, кто и до какого времени там стоит.
+        </p>
+
+        {% set regular = spots | selectattr('id', 'in', [1,2,3,4,5,6,7,8]) | list %}
+        {% set blocking = spots | selectattr('type', 'equalto', 'blocking') | list %}
+
+        {% if regular %}
+            <div>
+                <div class="parking-spots-group-title">Обычные места (1–8)</div>
+                <div class="parking-spots-grid">
+                    {% for spot in regular %}
+                        <div class="parking-spot-card">
+                            <div class="parking-spot-card-title">Место {{ spot.label }}</div>
+                            <button
+                                type="button"
+                                class="parking-spot-btn"
+                                data-spot-id="{{ spot.id }}"
+                                data-spot-label="{{ spot.label }}"
+                                data-spot-type="regular"
+                            >
+                                <span class="parking-spot-status" data-role="spot-status">Можно занять</span>
+                            </button>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+
+        {% if blocking %}
+            <div>
+                <div class="parking-spots-group-title">Перекрывающие (9–12, телефон обязателен)</div>
+                <div class="parking-spots-grid">
+                    {% for spot in blocking %}
+                        <div class="parking-spot-card">
+                            <div class="parking-spot-card-title">Место {{ spot.label }}</div>
+                            <button
+                                type="button"
+                                class="parking-spot-btn"
+                                data-spot-id="{{ spot.id }}"
+                                data-spot-label="{{ spot.label }}"
+                                data-spot-type="blocking"
+                            >
+                                <span class="parking-spot-status" data-role="spot-status">Можно занять</span>
+                            </button>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+    </div>
+
+    <!-- НИЖНЯЯ КАРТА ПОД СПИСКОМ МЕСТ -->
+    <figure class="parking-figure" style="margin-top: 24px;">
+        <figcaption>Схема парковки - позади дома</figcaption>
+        <img src="{{ url_for('static', filename='img/parking_bottom.png') }}"
+             alt="Схема парковки, нижняя часть">
+    </figure>
+
+    <!-- Модальное окно места -->
+    <div class="parking-modal-backdrop" id="parkingModal">
+        <div class="parking-modal">
+            <div class="parking-modal-header">
+                <h2 class="parking-modal-title" id="parkingModalTitle">Место</h2>
+                <button class="parking-modal-close" type="button" data-role="close-modal">&times;</button>
+            </div>
+            <div class="parking-modal-body">
+                <div class="parking-modal-row">
+                    <div class="parking-modal-label">Статус</div>
+                    <div id="parkingModalStatus" class="parking-modal-hint">Свободно</div>
+                </div>
+
+                <!-- флаг "надолго" — только для админа -->
+                <div class="parking-modal-row parking-modal-editable" id="parkingLongRow">
+                    <label class="parking-modal-label" for="parkingLongTerm">
+                        <input type="checkbox" id="parkingLongTerm">
+                        Надолго (только админ может менять)
+                    </label>
+                    <div class="parking-modal-hint">
+                        Если включено, остальные видят, что машина стоит здесь надолго.
+                    </div>
+                </div>
+
+                <div class="parking-modal-row parking-modal-editable">
+                    <label class="parking-modal-label" for="parkingUntil">
+                        До какого времени планируете стоять? (необязательно)
+                    </label>
+                    <input
+                        type="datetime-local"
+                        id="parkingUntil"
+                        class="parking-modal-input"
+                        autocomplete="off"
+                    >
+                    <div class="parking-modal-hint">
+                        Выберите дату и время, затем нажмите Enter или кликните вне поля, чтобы закрыть календарь.
+                    </div>
+                </div>
+
+                <div class="parking-modal-row parking-modal-editable">
+                    <label class="parking-modal-label" for="parkingCarCode">
+                        Номер или код машины (3 цифры или полный номер)
+                    </label>
+                    <input
+                        type="text"
+                        id="parkingCarCode"
+                        class="parking-modal-input"
+                        placeholder="418 или А777ЕТ197"
+                    >
+                </div>
+
+                <div class="parking-modal-row parking-modal-editable">
+                    <label class="parking-modal-label" for="parkingPhone">
+                        Телефон для связи (для перекрывающих мест лучше указать)
+                    </label>
+                    <input type="tel" id="parkingPhone" class="parking-modal-input" placeholder="+7 900 000-00-00">
+                    <label class="parking-modal-label">
+                        <input type="checkbox" id="parkingShowPhone" checked>
+                        Показывать телефон соседям на этом месте
+                    </label>
+                </div>
+
+                <div class="parking-modal-row">
+                    <div class="parking-modal-label">Текущий владелец</div>
+                    <div id="parkingModalOwner" class="parking-modal-hint">Место свободно.</div>
+                </div>
+				<!-- Фото машины гостя, если есть -->
+<div id="parkingModalOwnerPhoto" style="display: none; margin-top: 4px;">
+    <a id="parkingModalOwnerPhotoLink" href="#" target="_blank">
+        <img
+            id="parkingModalOwnerPhotoImg"
+            src=""
+            alt="Фото машины гостя"
+            style="max-width: 100%; border-radius: 8px; display: block;"
+        >
+    </a>
+</div>
+
+
+
+                <div id="parkingModalError" class="parking-modal-error"></div>
+            </div>
+<div class="parking-modal-footer">
+    <button type="button" class="parking-btn parking-btn-secondary" data-role="cancel-modal">
+        Отмена
+    </button>
+
+    <!-- Новая кнопка подписки -->
+    <button
+        type="button"
+        class="parking-btn parking-btn-secondary"
+        id="parkingSubscribeBtn"
+        style="display: none;"
+    >
+        Напомнить, когда освободится
+    </button>
+
+    <button type="button" class="parking-btn parking-btn-danger parking-modal-editable" id="parkingFreeBtn" style="display:none;">
+        Освободить место
+    </button>
+    <button type="button" class="parking-btn parking-btn-primary parking-modal-editable" id="parkingSaveBtn">
+        Занять место
+    </button>
+</div>
+
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            const root = document.getElementById("parking-root");
+            const userApartment = (root.dataset.userApartment || "").trim();
+            const isAdmin = root.dataset.userIsAdmin === "1";
+            const userPhone = (root.dataset.userPhone || "").trim();
+            const userCarNumber = (root.dataset.userCarNumber || "").trim();
+			const canSubscribe = root.dataset.userCanSubscribe === "1";
+
+            const modalBackdrop = document.getElementById("parkingModal");
+            const modalTitle = document.getElementById("parkingModalTitle");
+            const modalStatus = document.getElementById("parkingModalStatus");
+            const modalOwner = document.getElementById("parkingModalOwner");
+const modalError = document.getElementById("parkingModalError");
+
+// блок с фото + ссылка + сама картинка
+const modalOwnerPhotoBox  = document.getElementById("parkingModalOwnerPhoto");
+const modalOwnerPhotoLink = document.getElementById("parkingModalOwnerPhotoLink");
+const modalOwnerPhotoImg  = document.getElementById("parkingModalOwnerPhotoImg");
+
+            const inputUntil = document.getElementById("parkingUntil");
+            const inputCarCode = document.getElementById("parkingCarCode");
+            const inputPhone = document.getElementById("parkingPhone");
+            const inputShowPhone = document.getElementById("parkingShowPhone");
+            const inputLongTerm = document.getElementById("parkingLongTerm");
+            const longRow = document.getElementById("parkingLongRow");
+            const btnSave = document.getElementById("parkingSaveBtn");
+            const btnFree = document.getElementById("parkingFreeBtn");
+			const btnSubscribe = document.getElementById("parkingSubscribeBtn");
+            const editableRows = document.querySelectorAll(".parking-modal-editable");
+
+            let currentSpotId = null;
+            let currentSpotType = null;
+            let currentSpotData = null;
+
+            // календарь по клику на поле
+            if (inputUntil && typeof inputUntil.showPicker === "function") {
+                const openPicker = () => inputUntil.showPicker();
+                inputUntil.addEventListener("click", openPicker);
+                inputUntil.addEventListener("focus", openPicker);
+            }
+
+            function formatUntilText(untilStr) {
+                if (!untilStr) {
+                    return "Занято";
+                }
+                const dt = new Date(untilStr);
+                if (isNaN(dt.getTime())) {
+                    return "Занято";
+                }
+
+                const now = new Date();
+                const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                const target = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+                const diffDays = Math.round((target - today) / 86400000);
+
+                const timeStr = dt.toLocaleTimeString("ru-RU", {
+                    hour: "2-digit",
+                    minute: "2-digit"
+                });
+
+                let dayPart;
+                if (diffDays === 0) {
+                    dayPart = "сегодня";
+                } else if (diffDays === 1) {
+                    dayPart = "завтра";
+                } else if (diffDays === 2) {
+                    dayPart = "послезавтра";
+                } else {
+                    const d = String(dt.getDate()).padStart(2, "0");
+                    const m = String(dt.getMonth() + 1).padStart(2, "0");
+                    dayPart = `${d}.${m}`;
+                }
+
+                return `Занято до ${dayPart} ${timeStr}`;
+            }
+
+            function openModalForSpot(el, spotData) {
+                currentSpotId = parseInt(el.dataset.spotId, 10);
+                currentSpotType = el.dataset.spotType;
+                currentSpotData = spotData || null;
+
+                modalError.classList.remove("is-visible");
+                modalError.textContent = "";
+
+                const label = el.dataset.spotLabel;
+                modalTitle.textContent = `Место ${label}`;
+
+                const occ = spotData && spotData.occupied && spotData.occupant ? spotData.occupant : null;
+                const longTerm = occ && occ.long_term;
+
+               if (occ) {
+    let who;
+    if (occ.apartment && occ.apartment.toLowerCase() === "гость") {
+        const guestName = (occ.name || "").trim();
+        who = guestName ? `Гость ${guestName}` : "Гость";
+    } else if (occ.apartment) {
+        who = `Кв. ${occ.apartment}`;
+    } else {
+        who = "Неизвестно";
+    }
+
+    const untilText = occ.until ? ` до ${occ.until.replace("T", " ")}` : "";
+    const longText = longTerm ? " (надолго)" : "";
+    modalStatus.textContent = `Занято${untilText}${longText}`;
+    modalOwner.textContent =
+        `${who}` +
+        (occ.car_code ? `, авто ${occ.car_code}` : "") +
+        (occ.phone ? `, тел. ${occ.phone}` : "");
+} else {
+    modalStatus.textContent = "Свободно";
+    modalOwner.textContent = "Место свободно.";
+}
+
+
+// показать / скрыть фото гостя
+if (modalOwnerPhotoBox && modalOwnerPhotoImg && modalOwnerPhotoLink) {
+    if (
+        occ &&
+        occ.apartment &&
+        occ.apartment.toLowerCase() === "гость" &&
+        occ.guest_photo
+    ) {
+        let src = occ.guest_photo;
+
+        // если путь относительный — добавляем /static/
+        if (src && !src.startsWith("http")) {
+            src = "/static/" + src.replace(/^\/+/, "");
+        }
+
+        modalOwnerPhotoImg.src = src;
+        modalOwnerPhotoImg.alt = "Фото машины гостя";
+        modalOwnerPhotoLink.href = src;
+
+        modalOwnerPhotoBox.style.display = "block";
+    } else {
+        // скрываем блок, если фото нет или это не гость
+        modalOwnerPhotoImg.src = "";
+        modalOwnerPhotoLink.href = "#";
+        modalOwnerPhotoBox.style.display = "none";
+    }
+}
+
+
+
+                const occupiedByMe = !!(occ && occ.apartment === userApartment);
+                const occupied = !!occ;
+                const readOnly = occupied && !occupiedByMe && !isAdmin;
+				
+				// показать / скрыть кнопку подписки
+if (btnSubscribe) {
+    if (canSubscribe && occupied && !occupiedByMe) {
+        // место занято не мной, подписки разрешены
+        btnSubscribe.style.display = "inline-block";
+        btnSubscribe.disabled = false;
+    } else {
+        btnSubscribe.style.display = "none";
+    }
+}
+
+
+                // показать/скрыть редактируемые поля
+                editableRows.forEach((row) => {
+                    row.style.display = readOnly ? "none" : (row.tagName === "BUTTON" ? "inline-block" : "flex");
+                });
+
+                // галочка "надолго": видна только админу
+                if (isAdmin && !readOnly) {
+                    longRow.style.display = "flex";
+                    inputLongTerm.disabled = false;
+                    inputLongTerm.checked = !!longTerm;
+                } else {
+                    longRow.style.display = "none";
+                    inputLongTerm.checked = !!longTerm;
+                }
+
+                // значения по умолчанию
+inputUntil.value = "";
+inputCarCode.value = "";
+inputPhone.value = "";
+inputShowPhone.checked = true;
+
+// если место уже занято — всегда показываем данные текущего владельца
+if (occ) {
+    if (occ.until) inputUntil.value = occ.until.slice(0, 16); // datetime-local
+    if (occ.car_code) inputCarCode.value = occ.car_code;
+    if (occ.phone) inputPhone.value = occ.phone;
+    inputShowPhone.checked = Boolean(occ.show_phone);
+
+// если место свободно и это обычный пользователь — подставляем его профиль
+} else if (!occ && !isAdmin) {
+    inputCarCode.value = userCarNumber || "";
+    inputPhone.value = userPhone || "";
+    inputShowPhone.checked = true;
+}
+// если место свободно и это админ — поля остаются пустыми
+
+
+                btnSave.style.display = readOnly ? "none" : "inline-block";
+                btnSave.disabled = false;
+                btnFree.style.display = "none";
+
+                if (occupied && (occupiedByMe || isAdmin)) {
+                    btnFree.style.display = "inline-block";
+                    btnSave.textContent = occupiedByMe ? "Обновить данные" : "Занять место (как админ)";
+                } else if (readOnly) {
+                    modalOwner.textContent += " Изменять это место может только владелец или администратор.";
+                } else {
+                    btnSave.textContent = "Занять место";
+                }
+
+                modalBackdrop.classList.add("is-open");
+            }
+
+            function closeModal() {
+    modalBackdrop.classList.remove("is-open");
+    currentSpotId = null;
+    currentSpotData = null;
+
+    // Прячем кнопку подписки при закрытии
+    if (btnSubscribe) {
+        btnSubscribe.style.display = "none";
+    }
+}
+
+
+            function showError(msg) {
+                modalError.textContent = msg;
+                modalError.classList.add("is-visible");
+            }
+
+            function clearError() {
+                modalError.textContent = "";
+                modalError.classList.remove("is-visible");
+            }
+
+            async function fetchSpotsAndRefresh() {
+                try {
+                    const resp = await fetch("/api/parking/spots");
+                    const data = await resp.json();
+                    const list = data.spots || [];
+
+                    const indexById = {};
+                    list.forEach((s) => { indexById[String(s.id)] = s; });
+
+                    // точки на схеме
+document.querySelectorAll(".parking-hotspot").forEach((el) => {
+    const sid = el.dataset.spotId;
+    const info = indexById[sid];
+    if (!info) return;
+
+    const carImg = el.querySelector(".parking-hotspot-car");
+
+    el.dataset.occupied = info.occupied ? "1" : "0";
+
+    el.classList.remove(
+        "parking-hotspot--occupied",
+        "parking-hotspot--occupied-other",
+        "parking-hotspot--long-term"
+    );
+
+    if (info.occupied && info.occupant) {
+        const occ = info.occupant;
+        const mine = occ.apartment === userApartment;
+
+        el.classList.add("parking-hotspot--occupied");
+        if (!mine && !isAdmin) {
+            el.classList.add("parking-hotspot--occupied-other");
+        }
+
+        if (occ.long_term) {
+            el.classList.add("parking-hotspot--long-term");
+        }
+
+        if (carImg) {
+            carImg.style.display = "block";
+        }
+
+            let who;
+    if (occ.apartment && occ.apartment.toLowerCase() === "гость") {
+        const guestName = (occ.name || "").trim();
+        who = guestName ? `Гость ${guestName}` : "Гость";
+    } else if (occ.apartment) {
+        who = `Кв. ${occ.apartment}`;
+    } else {
+        who = "Неизвестно";
+    }
+
+        const longText = occ.long_term ? " (надолго)" : "";
+        el.title = occ.until
+            ? `${who}, ${formatUntilText(occ.until)}${longText}`
+            : `Занято: ${who}${longText}`;
+    } else {
+        if (carImg) {
+            carImg.style.display = "none";
+        }
+        el.title = "Свободно";
+    }
+});
+
+
+                    // кнопки в списке
+                    document.querySelectorAll(".parking-spot-btn").forEach((el) => {
+                        const sid = el.dataset.spotId;
+                        const info = indexById[sid];
+                        const statusEl = el.querySelector('[data-role="spot-status"]');
+                        if (!statusEl) return;
+
+                        el.classList.remove(
+                            "parking-spot-btn--free",
+                            "parking-spot-btn--busy",
+                            "parking-spot-btn--long"
+                        );
+
+                        if (!info || !info.occupied || !info.occupant) {
+                            el.classList.add("parking-spot-btn--free");
+                            statusEl.textContent = "Можно занять";
+                            return;
+                        }
+
+                        const occ = info.occupant;
+                        if (occ.long_term) {
+                            el.classList.add("parking-spot-btn--long");
+                            statusEl.textContent = "Надолго";
+                        } else {
+                            el.classList.add("parking-spot-btn--busy");
+                            statusEl.textContent = formatUntilText(occ.until);
+                        }
+                    });
+
+                    return indexById;
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+
+            function setupClickHandlers() {
+                function attach(el) {
+                    el.addEventListener("click", async () => {
+                        const all = await fetchSpotsAndRefresh();
+                        const sid = el.dataset.spotId;
+                        const info = all ? all[sid] : null;
+                        openModalForSpot(el, info);
+                    });
+                }
+
+                document.querySelectorAll(".parking-spot-btn").forEach(attach);
+                document.querySelectorAll(".parking-hotspot").forEach(attach);
+            }
+
+            setupClickHandlers();
+			
+			            // Фуллскрин-карта на мобильных
+            const layout = document.querySelector(".parking-layout");
+            const fullscreenBtn = document.getElementById("parkingFullscreenToggle");
+
+            if (layout && fullscreenBtn) {
+                fullscreenBtn.addEventListener("click", () => {
+                    const active = layout.classList.toggle("parking-layout-fullscreen");
+                    fullscreenBtn.classList.toggle("is-active", active);
+                    fullscreenBtn.setAttribute("aria-pressed", active ? "true" : "false");
+                });
+            }
+
+			            // значки-подсказки на схеме
+            document.querySelectorAll(".parking-marker").forEach((btn) => {
+                btn.addEventListener("click", () => {
+                    const msg = btn.dataset.message || "";
+                    if (msg) {
+                        alert(msg);
+                    }
+                });
+            });
+
+            fetchSpotsAndRefresh();
+
+            // Закрываем модалку только по кнопкам "X" и "Отмена"
+            modalBackdrop.addEventListener("click", (e) => {
+                const role = e.target.dataset.role;
+                if (role === "close-modal" || role === "cancel-modal") {
+                    closeModal();
+                }
+            });
+
+            // Esc
+            window.addEventListener("keydown", (e) => {
+                if (e.key === "Escape" && modalBackdrop.classList.contains("is-open")) {
+                    closeModal();
+                }
+            });
+// Подписка на место — реальный запрос к серверу
+if (btnSubscribe) {
+    btnSubscribe.addEventListener("click", async () => {
+        if (!currentSpotId) return;
+        clearError();
+        btnSubscribe.disabled = true;
+
+        try {
+            const resp = await fetch(`/api/parking/spot/${currentSpotId}/subscribe`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+                body: JSON.stringify({}),
+            });
+
+            let data = {};
+            try {
+                data = await resp.json();
+            } catch (_) {
+                data = {};
+            }
+
+            if (!resp.ok || !data.ok) {
+                const code = data.error || "unknown";
+
+                if (code === "no_telegram_chat_id") {
+                    showError(
+                        "Нельзя оформить подписку: в профиле не привязан Telegram. " +
+                        "Откройте профиль и укажите telegram_chat_id."
+                    );
+                } else if (code === "no_user" || code === "no_user_record") {
+                    showError("Не удалось определить пользователя. Попробуйте выйти и войти заново.");
+                } else if (code === "unknown_spot") {
+                    showError("Это парковочное место не найдено в конфигурации.");
+                } else {
+                    showError("Не удалось оформить подписку. Попробуйте позже.");
+                }
+                return;
+            }
+
+            if (data.already) {
+                showError("Вы уже подписаны на уведомление по этому месту.");
+            } else {
+                alert("Готово! Вы подписаны на уведомление. Когда место освободится, бот пришлёт сообщение.");
+            }
+        } catch (e) {
+            console.error(e);
+            showError("Ошибка сети при оформлении подписки.");
+        } finally {
+            btnSubscribe.disabled = false;
+        }
+    });
+}
+
+
+            btnSave.addEventListener("click", async () => {
+                if (!currentSpotId) return;
+                clearError();
+
+                const untilVal = inputUntil.value ? inputUntil.value : "";
+                const phoneVal = inputPhone.value.trim();
+                const carCodeVal = inputCarCode.value.trim();
+                const showPhoneVal = inputShowPhone.checked;
+                const longTermVal = inputLongTerm.checked;
+
+                try {
+                    const resp = await fetch(`/api/parking/spot/${currentSpotId}/occupy`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            until: untilVal || "",
+                            phone: phoneVal,
+                            car_code: carCodeVal,
+                            show_phone: showPhoneVal,
+                            long_term: longTermVal
+                        })
+                    });
+                    const data = await resp.json();
+                    if (!resp.ok || !data.ok) {
+                        const err = data.error || "Ошибка при сохранении";
+
+                        if (err === "spot_busy") {
+                            showError("Это место сейчас занято другим пользователем.");
+                        } else if (err === "bad_until") {
+                            showError("Неверный формат времени. Попробуйте ещё раз.");
+                        } else if (err === "already_has_spot") {
+                            const otherId = data.current_spot_id;
+                            if (otherId) {
+                                showError(`У вас уже занято место ${otherId}. Сначала освободите его, затем попробуйте занять другое.`);
+                            } else {
+                                showError("У вас уже занято одно место. Сначала освободите его, затем попробуйте занять другое.");
+                            }
+                        } else {
+                            showError("Не удалось сохранить данные. Попробуйте ещё раз.");
+                        }
+                        return;
+                    }
+                    await fetchSpotsAndRefresh();
+                    closeModal();
+                } catch (e) {
+                    console.error(e);
+                    showError("Ошибка сети. Попробуйте ещё раз.");
+                }
+            });
+
+            btnFree.addEventListener("click", async () => {
+                if (!currentSpotId) return;
+                clearError();
+                try {
+                    const resp = await fetch(`/api/parking/spot/${currentSpotId}/free`, {
+                        method: "POST"
+                    });
+                    const data = await resp.json();
+                    if (!resp.ok || !data.ok) {
+                        showError("Не удалось освободить место.");
+                        return;
+                    }
+                    await fetchSpotsAndRefresh();
+                    closeModal();
+                } catch (e) {
+                    console.error(e);
+                    showError("Ошибка сети. Попробуйте ещё раз.");
+                }
+            });
+        });
+    </script>
+</section>
+{% endblock %}

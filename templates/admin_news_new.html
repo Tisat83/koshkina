@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}
+    {% if post %}Редактировать новость{% else %}Добавить новость{% endif %} | Мой дом на Кошкина
+{% endblock %}
+
+{% block content %}
+<section class="auth-section">
+    <h1>{% if post %}Редактировать новость{% else %}Добавить новость{% endif %}</h1>
+    <p class="auth-description">
+        Эта страница доступна только администраторам. Здесь можно добавить/отредактировать новость.
+        Превью и картинки можно загрузить с компьютера или указать ссылку — тогда изображение сохранится в
+        <code>static/img/news/</code>.
+    </p>
+
+    <form method="post" enctype="multipart/form-data" class="auth-form">
+        <div class="form-group">
+            <label for="title">Заголовок *</label>
+            <input type="text" id="title" name="title" required value="{{ post.title if post else '' }}" />
+        </div>
+
+        <div class="form-group">
+            <label for="date">Дата</label>
+            <input type="date" id="date" name="date" value="{{ (post.date if post and post.date else today) }}" />
+        </div>
+
+        <div class="form-group">
+            <label for="category">Категория</label>
+            <select id="category" name="category">
+                <option value="Дом" {% if post and post.category == "Дом" %}selected{% endif %}>Дом</option>
+                <option value="Район" {% if post and post.category == "Район" %}selected{% endif %}>Район</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <span>Источник (можно несколько):</span>
+            {% set src = post.source if post and post.source else [] %}
+            <label>
+                <input type="checkbox" name="src_telegram" {% if "telegram" in src %}checked{% endif %}>
+                Telegram
+            </label>
+            <label>
+                <input type="checkbox" name="src_max" {% if "max" in src %}checked{% endif %}>
+                MAX
+            </label>
+            <label>
+                <input type="checkbox" name="src_site"
+                       {% if (post and "site" in src) or (not post) %}checked{% endif %}>
+                Сайт
+            </label>
+        </div>
+
+        <div class="form-group">
+            <label>
+                <input type="checkbox" name="is_public"
+                       {% if (post and post.is_public) or (not post) %}checked{% endif %}>
+                Показывать эту новость публично (на главной странице и в открытом доступе)
+            </label>
+        </div>
+
+        <div class="form-group">
+            <label>
+                <input type="checkbox" name="is_archived"
+                       {% if post and post.is_archived %}checked{% endif %}>
+                Перенести новость в архив
+            </label>
+            <small>Архивные новости не показываются в обычной ленте, но доступны на отдельной странице архива.</small>
+        </div>
+
+        <div class="form-group">
+            <label>Превью‑картинка</label>
+
+            {% if post and post.image %}
+                <small>Текущее превью:</small>
+                <div class="news-image" style="margin-top:6px;">
+                    <img class="js-lightbox" src="{{ url_for('static', filename='img/' ~ post.image) }}" alt="">
+                </div>
+                <small style="opacity:.8;">{{ post.image }}</small>
+            {% endif %}
+
+            <input type="file" name="image_file" accept="image/*" style="margin-top:8px;" />
+            <small>Можно выбрать файл с компьютера.</small>
+
+            <div style="margin:6px 0 4px; font-size:12px;">или указать ссылку / путь:</div>
+            <input
+                type="text"
+                name="image"
+                placeholder="https://site.ru/image.jpg или news/primer.jpg"
+                value="{{ post.image if post and post.image else '' }}"
+            />
+        </div>
+
+        <div class="form-group">
+            <label>Дополнительные картинки</label>
+
+            {% if post and post.gallery %}
+                <small>Текущие картинки:</small>
+                <div class="news-gallery" style="margin-top:6px;">
+                    {% for g in post.gallery %}
+                        <img class="js-lightbox" src="{{ url_for('static', filename='img/' ~ g) }}" alt="">
+                    {% endfor %}
+                </div>
+                <small style="opacity:.8;">{{ post.gallery|join(', ') }}</small>
+            {% endif %}
+
+            <input type="file" name="gallery_files" accept="image/*" multiple style="margin-top:8px;" />
+            <small>Можно выбрать несколько файлов.</small>
+
+            <div style="margin:6px 0 4px; font-size:12px;">или перечислить ссылки / пути через запятую:</div>
+            <textarea name="gallery" rows="2"
+                      placeholder="https://site.ru/1.jpg, https://site.ru/2.jpg, news/local.jpg"></textarea>
+        </div>
+
+        <div class="form-group">
+            <label for="text">Текст новости *</label>
+            <textarea id="text" name="text" rows="8" required>{{ post.text if post else '' }}</textarea>
+        </div>
+
+        <button type="submit" class="btn-primary">
+            {% if post %}Сохранить изменения{% else %}Сохранить новость{% endif %}
+        </button>
+    </form>
+</section>
+{% endblock %}

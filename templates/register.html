@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}Регистрация | Мой дом на Кошкина{% endblock %}
+
+{% block content %}
+<section class="auth-section">
+    <h1>Регистрация жильца</h1>
+    <p class="auth-description">
+        Регистрация для квартиры № {{ apartment }}.
+        Придумайте PIN-код (от 4 до 8 цифр) и укажите свои данные.
+    </p>
+
+    <form method="post" class="auth-form">
+        <div class="form-group">
+            <label>Квартира</label>
+            <input type="text" value="{{ apartment }}" disabled />
+        </div>
+
+        <div class="form-group">
+            <label for="name">Имя</label>
+            <input type="text" id="name" name="name" required />
+        </div>
+
+        <div class="form-group">
+            <label for="phone">Телефон</label>
+            <input type="text" id="phone" name="phone" placeholder="+7..." />
+        </div>
+
+        <div class="form-group">
+            <label for="pin1">PIN-код (4–8 цифр)</label>
+            <input type="password"
+                   id="pin1"
+                   name="pin1"
+                   required
+                   minlength="4"
+                   maxlength="8"
+                   inputmode="numeric"
+                   pattern="[0-9]{4,8}" />
+        </div>
+
+        <div class="form-group">
+            <label for="pin2">Повторите PIN-код</label>
+            <input type="password"
+                   id="pin2"
+                   name="pin2"
+                   required
+                   minlength="4"
+                   maxlength="8"
+                   inputmode="numeric"
+                   pattern="[0-9]{4,8}" />
+        </div>
+
+        <button type="submit" class="btn-primary">Зарегистрироваться</button>
+    </form>
+
+    <p class="auth-hint">
+        PIN хранится в системе в зашифрованном виде (через хэш).
+        Никто, включая администратора, не может посмотреть его в явном виде.
+    </p>
+</section>
+{% endblock %}

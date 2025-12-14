@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Важная информация | Мой дом на Кошкина{% endblock %}
+
+{% block content %}
+<section class="info-section">
+    <h1>Важная информация</h1>
+    <p class="news-intro">
+        Контакты управляющей компании, аварийные телефоны, полезные ссылки и другая
+        информация, которая может пригодиться жильцам.
+    </p>
+
+{% if items %}
+    <div class="info-grid">
+        {% for item in items %}
+            <section class="sidebar-card info-item" id="info-{{ item.id }}">
+                <div class="sidebar-item-inner">
+                    {% if item.image %}
+                        <div class="sidebar-thumb">
+                            <img src="{{ url_for('static', filename='img/' ~ item.image) }}"
+                                 alt="">
+                        </div>
+                    {% endif %}
+                    <div class="sidebar-item-content">
+                        <h2 class="sidebar-card-title">{{ item.title }}</h2>
+                        <p class="sidebar-card-text">
+                            {{ item.text }}
+                        </p>
+                        {% if item.link_url %}
+                            <a href="{{ item.link_url }}" class="sidebar-link">
+                                {{ item.link_label or "Перейти" }} →
+                            </a>
+                        {% endif %}
+                    </div>
+                </div>
+            </section>
+        {% endfor %}
+    </div>
+{% else %}
+
+        <p>Администратор пока не добавил сюда записи.</p>
+    {% endif %}
+</section>
+{% endblock %}
