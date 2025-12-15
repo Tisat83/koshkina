@@ -7,7 +7,9 @@ import secrets
 from functools import wraps
 from datetime import date, datetime
 from urllib.parse import urlparse, urlencode
+import time
 from urllib.request import urlopen
+from werkzeug.utils import secure_filename
 
 from flask import (
     Flask,
@@ -36,6 +38,8 @@ ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp"}
 INVITES_FILE = DATA_DIR / "invites.json"
 REACTIONS_FILE = DATA_DIR / "reactions.json"
 PARKING_STATE_FILE = DATA_DIR / "parking_state.json"
+GUESTS_FILE = DATA_DIR / "guests.json"  # заявки гостей на парковку
+GUEST_PHOTOS_DIR = BASE_DIR / "static" / "img" / "guest_photos"
 
 # Сколько новостей выводить на странице /news
 POSTS_PER_PAGE = 5
@@ -50,11 +54,18 @@ ADMINS = {a.strip() for a in ADMIN_APARTMENTS.split(",") if a.strip()}
 
 # Аварийный вход по телефону (только для восстановления админа).
 # Включить: set ALLOW_PHONE_FALLBACK=1
-ALLOW_PHONE_FALLBACK = os.getenv("ALLOW_PHONE_FALLBACK", "0").strip().lower() in {"1", "true", "yes", "on"}
+ALLOW_PHONE_FALLBACK = os.getenv("ALLOW_PHONE_FALLBACK", "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 # Telegram-бот для уведомлений
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-TELEGRAM_API_BASE = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}" if TELEGRAM_BOT_TOKEN else ""
+TELEGRAM_API_BASE = (
+    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}" if TELEGRAM_BOT_TOKEN else ""
+)
 TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN)
 
 app = Flask(__name__)
@@ -63,6 +74,7 @@ app.secret_key = "change_this_secret_key_for_production"
 
 
 # ---------------- Jinja filters ----------------
+
 
 @app.template_filter("ru_date")
 def ru_date(value: str) -> str:
@@ -81,6 +93,7 @@ app.jinja_env.filters["date_ru"] = ru_date
 
 
 # ---------------- JSON helpers ----------------
+
 
 def load_json(path: Path, default):
     if not path.exists():
@@ -221,7 +234,37 @@ def save_reactions(reactions: dict):
     save_json(REACTIONS_FILE, reactions)
 
 
+def load_guests() -> dict:
+    """
+    Заявки гостей на парковку.
+    Формат:
+    {
+      "guests": [
+        {
+          "id": 1,
+          "created_at": "...",
+          "name": "...",
+          "phone": "...",
+          "car_number": "...",
+          "comment": "...",
+          "status": "pending/approved/rejected",
+          "source": "site/telegram"
+        },
+        ...
+      ]
+    }
+    """
+    return load_json(GUESTS_FILE, {"guests": []})
+
+
+def save_guests(data: dict):
+    if "guests" not in data or not isinstance(data["guests"], list):
+        data["guests"] = []
+    save_json(GUESTS_FILE, data)
+
+
 # ---------------- Sidebar visibility ----------------
+
 
 def _normalize_show_on(v):
     if not v:
@@ -266,6 +309,7 @@ def get_sidebar_items(place: str, limit: int = 3) -> list:
 
 
 # ---------------- Upload helpers ----------------
+
 
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -326,6 +370,7 @@ def download_image_from_url(url: str):
 
 # ---------------- Auth / PIN helpers ----------------
 
+
 def _is_legacy_sha256_hash(s: str) -> bool:
     if not isinstance(s, str) or len(s) != 64:
         return False
@@ -342,6 +387,7 @@ def check_pin(pin: str, stored_hash: str) -> bool:
     try:
         if _is_legacy_sha256_hash(stored_hash):
             import hashlib, hmac
+
             candidate = hashlib.sha256(pin.encode("utf-8")).hexdigest()
             return hmac.compare_digest(candidate, stored_hash)
         return check_password_hash(stored_hash, pin)
@@ -355,6 +401,7 @@ def login_required(view_func):
         if "user" not in session:
             return redirect(url_for("login"))
         return view_func(*args, **kwargs)
+
     return wrapper
 
 
@@ -374,6 +421,7 @@ def admin_required(view_func):
             flash("У вас нет доступа к этому разделу.", "error")
             return redirect(url_for("news"))
         return view_func(*args, **kwargs)
+
     return wrapper
 
 
@@ -395,7 +443,28 @@ def user_has_any_pin(user_record: dict | None) -> bool:
     return False
 
 
+def current_user_parking_flags():
+    """
+    Общий хелпер: текущий пользователь + флаги доступа к парковке.
+    can_use_parking: можно ли пользоваться парковкой
+    can_subscribe_parking: можно ли подписываться на уведомления
+    """
+    sess_user = session.get("user") or {}
+    apartment = str(sess_user.get("apartment") or "").strip()
+    users = load_users()
+    record = users.get(apartment) if apartment and isinstance(users, dict) else {}
+    if not isinstance(record, dict):
+        record = {}
+    is_admin = bool(sess_user.get("is_admin"))
+    # по умолчанию парковка разрешена всем, админ всегда может
+    can_use_parking = bool(record.get("can_use_parking", True) or is_admin)
+    # подписки по умолчанию выключены, но админ может всё
+    can_subscribe_parking = bool(record.get("can_subscribe_parking", False) or is_admin)
+    return sess_user, apartment, record, can_use_parking, can_subscribe_parking
+
+
 # ---------------- Pagination ----------------
+
 
 def paginate(items: list, page: int, per_page: int):
     total = len(items)
@@ -410,12 +479,12 @@ def paginate(items: list, page: int, per_page: int):
 
 # ---------------- Routes ----------------
 
+
 @app.route("/")
 def index():
     posts = load_posts()
     public_posts = [
-        p for p in posts
-        if bool(p.get("is_public")) and not bool(p.get("is_archived"))
+        p for p in posts if bool(p.get("is_public")) and not bool(p.get("is_archived"))
     ]
     public_sorted = sorted(public_posts, key=lambda p: p.get("date", ""), reverse=True)
 
@@ -426,6 +495,259 @@ def index():
         public_posts=public_sorted[:5],
         sidebar_items=sidebar_items,
     )
+
+
+@app.route("/p/guest")
+def parking_guest():
+    """
+    Гостевая страница парковки.
+    Доступна без авторизации, используется для QR-ссылок.
+    """
+    # грузим текущую конфигурацию парковки (если понадобится дальше)
+    parking_data = load_parking()
+
+    # грузим текущее состояние занятости
+    state = load_parking_state()
+    state_spots = state.get("spots", {}) or {}
+
+    # список занятых мест в виде строк "1", "2", ...
+    disabled_spots = [
+        str(spot_id)
+        for spot_id, spot_info in state_spots.items()
+        if spot_info  # если словарь не пустой — место занято
+    ]
+
+    return render_template(
+        "parking_guest.html",
+        telegram_bot_url="#",
+        disabled_spots=disabled_spots,
+    )
+
+@app.route("/admin/guests", methods=["GET", "POST"])
+@login_required
+@admin_required
+def admin_guests():
+    """
+    Простая админка для просмотра и изменения статусов гостевых заявок.
+    При одобрении заявки с указанием spot_id пытаемся занять это место за гостя.
+    """
+    guests_data = load_guests()
+    guests = guests_data.get("guests") or []
+
+    # Сначала более новые
+    guests_sorted = sorted(
+        guests,
+        key=lambda g: (g.get("created_at") or "", g.get("id") or 0),
+        reverse=True,
+    )
+
+    if request.method == "POST":
+        guest_id_str = (request.form.get("guest_id") or "").strip()
+        action = (request.form.get("action") or "").strip()
+
+        try:
+            guest_id = int(guest_id_str)
+        except ValueError:
+            guest_id = None
+
+        if guest_id is not None and action:
+            target_index = None
+            for idx, g in enumerate(guests):
+                try:
+                    gid = int(g.get("id") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if gid == guest_id:
+                    target_index = idx
+                    break
+
+            if target_index is not None:
+                g = guests[target_index]
+
+                if action == "approve":
+                    g["status"] = "approved"
+
+                    # если в заявке указано место — попробуем занять его за гостя
+                    spot_id = g.get("spot_id")
+                    try:
+                        spot_id_int = int(spot_id) if spot_id is not None else None
+                    except (TypeError, ValueError):
+                        spot_id_int = None
+
+                    if spot_id_int:
+                        # проверяем, что такое место вообще есть в конфиге парковки
+                        parking_cfg = load_parking()
+                        spot_ids = {
+                            int(s.get("id", 0))
+                            for s in parking_cfg.get("spots", [])
+                            if s.get("id") is not None
+                        }
+
+                        if spot_id_int in spot_ids:
+                            state = load_parking_state()
+                            spots_state = state.setdefault("spots", {})
+                            sid = str(spot_id_int)
+
+                            # если место свободно — занимаем его гостем
+                            if not spots_state.get(sid):
+                                spots_state[sid] = {
+    # помечаем, что это гость, чтобы фронт не писал "Неизвестно"
+    "apartment": "гость",
+    "name": g.get("name") or "",
+    "car_code": g.get("car_number") or "",
+    "phone": g.get("phone") or "",
+    "show_phone": True,
+    "until": "",            # пока без времени
+    "long_term": False,
+    "updated_at": datetime.utcnow().isoformat(
+        timespec="minutes"
+    ),
+    "guest_photo": g.get("photo") or "",
+    "telegram_chat_id": "",
+    "is_guest": True,
+    # <<< НОВОЕ: путь к фото гостя (из guests.json)
+            "guest_photo": g.get("photo") or "",
+}
+
+                                save_parking_state(state)
+                            else:
+                                flash(
+                                    f"Заявка гостя №{guest_id} одобрена, "
+                                    f"но место {spot_id_int} уже занято.",
+                                    "warning",
+                                )
+
+                    flash(f"Заявка гостя №{guest_id} одобрена.", "success")
+
+                elif action == "reject":
+                    g["status"] = "rejected"
+                    flash(f"Заявка гостя №{guest_id} отклонена.", "info")
+
+                elif action == "reset":
+                    g["status"] = "pending"
+                    flash(
+                        f"Заявка гостя №{guest_id} снова помечена как 'ожидает решения'.",
+                        "success",
+                    )
+
+                elif action == "delete":
+                    guests.pop(target_index)
+                    flash(f"Заявка гостя №{guest_id} удалена.", "success")
+
+                guests_data["guests"] = guests
+                save_guests(guests_data)
+
+        return redirect(url_for("admin_guests"))
+
+    return render_template("admin_guests.html", guests=guests_sorted)
+
+
+@app.route("/parking/guest/demo")
+def parking_guest_demo():
+    """Старый демо-адрес, теперь просто редирект на /p/guest."""
+    return redirect(url_for("parking_guest"))
+
+
+@app.route("/p/guest/register", methods=["POST"])
+def parking_guest_register():
+    """Приём заявки гостя с формы на /p/guest."""
+    # --- Основные поля формы ---
+    name = (request.form.get("name") or "").strip()
+    phone = (request.form.get("phone") or "").strip()
+    car_number = (request.form.get("car_number") or "").strip()
+    comment = (request.form.get("comment") or "").strip()
+    spot_id_raw = (request.form.get("spot_id") or "").strip()
+    until_raw = (request.form.get("until") or "").strip()  # datetime-local из формы
+
+    # --- Номер места ---
+    try:
+        spot_id = int(spot_id_raw) if spot_id_raw else None
+    except ValueError:
+        spot_id = None
+
+    # --- Время до (может быть пустым) ---
+    until_iso = None
+    if until_raw:
+        try:
+            dt = datetime.fromisoformat(until_raw)
+            until_iso = dt.isoformat(timespec="minutes")
+        except ValueError:
+            until_iso = None
+
+    # --- Фото ---
+    photo_file = request.files.get("photo")
+    photo_rel_path = None
+    if photo_file and photo_file.filename:
+        GUEST_PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
+        filename = secure_filename(f"{int(time.time())}_{photo_file.filename}")
+        full_path = GUEST_PHOTOS_DIR / filename
+        photo_file.save(full_path)
+        # относительный путь от папки static/
+        photo_rel_path = f"img/guest_photos/{filename}"
+
+    # --- Загрузка и сохранение guests.json ---
+    guests_data = load_guests()
+    guests = guests_data.get("guests") or []
+
+    new_id = max((int(g.get("id", 0)) for g in guests), default=0) + 1
+
+    guest = {
+        "id": new_id,
+        "name": name,
+        "phone": phone,
+        "car_number": car_number,
+        "spot_id": spot_id,
+        "until": until_iso,
+        "comment": comment,
+        "status": "pending",
+        "photo": photo_rel_path,  # сюда кладём путь к фото
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "source": "site",
+    }
+
+    guests.append(guest)
+    guests_data["guests"] = guests
+    save_guests(guests_data)
+
+    # --- Уведомление админам в Telegram ---
+    if TELEGRAM_ENABLED:
+        try:
+            users = load_users()
+            lines = [
+                "Новая гостевая заявка на парковку:",
+                f"ID: {new_id}",
+                f"Имя: {name or '—'}",
+                f"Телефон: {phone or '—'}",
+                f"Номер машины: {car_number or '—'}",
+            ]
+            if spot_id is not None:
+                lines.append(f"Место: {spot_id}")
+            if until_iso:
+                lines.append(f"Примерно до: {until_iso}")
+            if comment:
+                lines.append(f"Комментарий: {comment}")
+            lines.append("")
+            lines.append(
+                "Подтвердите или отклоните заявку в админке сайта (раздел гостей)."
+            )
+            text = "\n".join(lines)
+
+            for apt, rec in users.items():
+                if not isinstance(rec, dict):
+                    continue
+                # админ — либо в списке ADMINS, либо флаг is_admin
+                if not (is_admin_for(str(apt), rec) or rec.get("is_admin")):
+                    continue
+                chat_id = (rec.get("telegram_chat_id") or "").strip()
+                if not chat_id:
+                    continue
+                send_telegram_message(chat_id, text)
+        except Exception:
+            # не ломаем регистрацию, если телега недоступна
+            pass
+
+    # фронт ждёт JSON
+    return jsonify({"ok": True, "guest_id": new_id, "status": "pending"})
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -493,9 +815,17 @@ def login():
                         "is_admin": admin,
                     }
                     if has_pin and ALLOW_PHONE_FALLBACK:
-                        flash("ВНИМАНИЕ: включён аварийный вход по телефону. После восстановления выключите режим.", "info")
+                        flash(
+                            "ВНИМАНИЕ: включён аварийный вход по телефону. "
+                            "После восстановления выключите режим.",
+                            "info",
+                        )
                     else:
-                        flash("Вы вошли по старой схеме (телефон). Попросите администратора выдать ссылку и задать PIN.", "info")
+                        flash(
+                            "Вы вошли по старой схеме (телефон). "
+                            "Попросите администратора выдать ссылку и задать PIN.",
+                            "info",
+                        )
                     return redirect(url_for("news"))
 
         flash("Неверный номер квартиры или PIN.", "error")
@@ -531,7 +861,9 @@ def profile():
 
     # --- читаем существующие данные профиля ---
     last_name = (record.get("last_name") or "").strip()
-    first_name = (record.get("first_name") or "").strip() or (sess_user.get("name") or "").strip()
+    first_name = (record.get("first_name") or "").strip() or (
+        sess_user.get("name") or ""
+    ).strip()
     middle_name = (record.get("middle_name") or "").strip()
 
     # телефоны
@@ -548,6 +880,10 @@ def profile():
 
     # номер машины (для совместимости с парковкой берём и car_number, и car_code)
     car_number = (record.get("car_number") or record.get("car_code") or "").strip()
+
+    # флаги доступа к парковке (пока только для чтения, править будем позже)
+    can_use_parking = bool(record.get("can_use_parking", True))
+    can_subscribe_parking = bool(record.get("can_subscribe_parking", False))
 
     if request.method == "POST":
         # --- читаем форму ---
@@ -625,13 +961,18 @@ def profile():
             if not isinstance(residents, list):
                 residents = []
 
-            display_name = first_name or sess_user.get("name") or f"Житель кв. {apartment}"
+            display_name = (
+                first_name or sess_user.get("name") or f"Житель кв. {apartment}"
+            )
 
             updated = False
             for r in residents:
                 if not isinstance(r, dict):
                     continue
-                if r.get("name") == sess_user.get("name") or r.get("name") == display_name:
+                if (
+                    r.get("name") == sess_user.get("name")
+                    or r.get("name") == display_name
+                ):
                     r["name"] = display_name
                     r["pin_hash"] = hash_pin(new_pin1)
                     updated = True
@@ -664,6 +1005,8 @@ def profile():
         phone1=phone1,
         phone2=phone2,
         car_number=car_number,
+        can_use_parking=can_use_parking,
+        can_subscribe_parking=can_subscribe_parking,
     )
 
 
@@ -674,31 +1017,42 @@ def parking():
     parking_data = load_parking()
     spots = parking_data.get("spots", [])
 
-    # Пользователь из сессии
-    sess_user = session.get("user") or {}
-    apartment = str(sess_user.get("apartment") or "").strip()
+    (
+        sess_user,
+        apartment,
+        user_row,
+        can_use_parking,
+        can_subscribe_parking,
+    ) = current_user_parking_flags()
+    if not apartment:
+        flash("Не удалось определить квартиру.", "error")
+        return redirect(url_for("news"))
+
+    if not can_use_parking:
+        flash(
+            "Доступ к парковке для вашей квартиры пока не открыт. Обратитесь к администратору.",
+            "error",
+        )
+        return redirect(url_for("news"))
 
     phone = ""
     car_code = ""
 
     # Подтягиваем телефон и номер авто из users.json по квартире
-    if apartment:
-        users = load_users()
-        user_row = users.get(apartment)
-        if isinstance(user_row, dict):
-            # телефон может быть строкой или списком
-            if isinstance(user_row.get("phone"), str) and user_row["phone"].strip():
-                phone = user_row["phone"].strip()
-            elif isinstance(user_row.get("phones"), list):
-                for p in user_row["phones"]:
-                    if p:
-                        phone = str(p).strip()
-                        if phone:
-                            break
+    if apartment and user_row:
+        # телефон может быть строкой или списком
+        if isinstance(user_row.get("phone"), str) and user_row["phone"].strip():
+            phone = user_row["phone"].strip()
+        elif isinstance(user_row.get("phones"), list):
+            for p in user_row["phones"]:
+                if p:
+                    phone = str(p).strip()
+                    if phone:
+                        break
 
-            # номер машины (если поле car_code есть в users.json)
-            if isinstance(user_row.get("car_code"), str) and user_row["car_code"].strip():
-                car_code = user_row["car_code"].strip()
+        # номер машины (если поле car_code есть в users.json)
+        if isinstance(user_row.get("car_code"), str) and user_row["car_code"].strip():
+            car_code = user_row["car_code"].strip()
 
     # обогащаем данные пользователя, не ломая существующую структуру
     user = dict(sess_user)
@@ -706,6 +1060,8 @@ def parking():
         user["phone"] = phone
     if car_code and "car_code" not in user:
         user["car_code"] = car_code
+    user["can_use_parking"] = can_use_parking
+    user["can_subscribe_parking"] = can_subscribe_parking
 
     return render_template(
         "parking.html",
@@ -714,10 +1070,21 @@ def parking():
     )
 
 
-@app.route("/api/parking/spots")
+@app.route("/p")
 @login_required
+def parking_short():
+    """Короткий адрес для страницы парковки (/p вместо /parking)."""
+    return parking()
+
+@app.route("/api/parking/spots")
 def api_parking_spots():
-    """Отдаём все места + текущее состояние занятости."""
+    """Отдаём все места + текущее состояние занятости.
+
+    Для авторизованных пользователей с правом парковки возвращаем occupant с деталями.
+    Для гостей и тех, кому парковка запрещена, возвращаем только occupied без персональных данных.
+    """
+    sess_user, apartment, user_record, can_use_parking, _ = current_user_parking_flags()
+
     config = load_parking()
     state = load_parking_state()
 
@@ -728,13 +1095,20 @@ def api_parking_spots():
     for spot in spots_cfg:
         sid = str(spot.get("id"))
         sstate = state_spots.get(sid, {})
+        occupied = bool(sstate)
+
+        # occupant показываем только тем, у кого парковка разрешена
+        occupant = sstate or None
+        if not can_use_parking:
+            occupant = None
+
         merged.append({
             "id": spot.get("id"),
             "label": spot.get("label"),
             "type": spot.get("type"),
             "description": spot.get("description"),
-            "occupied": bool(sstate),
-            "occupant": sstate or None,
+            "occupied": occupied,
+            "occupant": occupant,
         })
 
     return jsonify({"spots": merged})
@@ -751,10 +1125,14 @@ def api_parking_occupy(spot_id: int):
       - если админ ставит место "надолго" (для брошенной машины и т.п.),
         квартиру админа в карточке не показываем (apartment оставляем пустым).
     """
-    user = session.get("user") or {}
-    apartment = str(user.get("apartment") or "").strip()
+    sess_user, apartment, _, can_use_parking, _ = current_user_parking_flags()
+    user = sess_user
     if not apartment:
         return jsonify({"ok": False, "error": "no_user"}), 400
+
+    is_admin = bool(user.get("is_admin"))
+    if not can_use_parking and not is_admin:
+        return jsonify({"ok": False, "error": "parking_not_allowed"}), 403
 
     # Проверяем, что такое место вообще есть в конфиге парковки
     config = load_parking()
@@ -778,7 +1156,6 @@ def api_parking_occupy(spot_id: int):
     spots = state.setdefault("spots", {})
     subscriptions = state.setdefault("subscriptions", {})
     sid = str(spot_id)
-    is_admin = bool(user.get("is_admin"))
 
     # если не админ — проверяем, не занято ли уже другое место этой же квартирой
     if not is_admin:
@@ -852,9 +1229,15 @@ def api_parking_occupy(spot_id: int):
 @login_required
 def api_parking_free(spot_id: int):
     """Освободить место: может владелец или админ."""
-    user = session.get("user") or {}
-    apartment = str(user.get("apartment") or "").strip()
+    sess_user, apartment, _, can_use_parking, _ = current_user_parking_flags()
+    user = sess_user
     is_admin = bool(user.get("is_admin"))
+
+    if not apartment:
+        return jsonify({"ok": False, "error": "no_user"}), 400
+
+    if not can_use_parking and not is_admin:
+        return jsonify({"ok": False, "error": "parking_not_allowed"}), 403
 
     state = load_parking_state()
     spots = state.setdefault("spots", {})
@@ -903,13 +1286,22 @@ def api_parking_subscribe(spot_id: int):
     Подписаться на уведомление, когда конкретное место освободится.
     Используем telegram_chat_id из профиля пользователя.
     """
-    sess_user = session.get("user") or {}
-    apartment = (sess_user.get("apartment") or "").strip()
+    (
+        sess_user,
+        apartment,
+        record,
+        can_use_parking,
+        can_subscribe_parking,
+    ) = current_user_parking_flags()
     if not apartment:
         return jsonify({"ok": False, "error": "no_user"}), 400
 
-    users = load_users()
-    record = users.get(apartment)
+    if not can_use_parking and not sess_user.get("is_admin"):
+        return jsonify({"ok": False, "error": "parking_not_allowed"}), 403
+
+    if not can_subscribe_parking and not sess_user.get("is_admin"):
+        return jsonify({"ok": False, "error": "subscribe_not_allowed"}), 403
+
     if not isinstance(record, dict):
         return jsonify({"ok": False, "error": "no_user_record"}), 400
 
@@ -942,13 +1334,22 @@ def api_parking_subscribe(spot_id: int):
 @login_required
 def api_parking_unsubscribe(spot_id: int):
     """Отписаться от уведомлений по конкретному месту."""
-    sess_user = session.get("user") or {}
-    apartment = (sess_user.get("apartment") or "").strip()
+    (
+        sess_user,
+        apartment,
+        record,
+        can_use_parking,
+        can_subscribe_parking,
+    ) = current_user_parking_flags()
     if not apartment:
         return jsonify({"ok": False, "error": "no_user"}), 400
 
-    users = load_users()
-    record = users.get(apartment)
+    if not can_use_parking and not sess_user.get("is_admin"):
+        return jsonify({"ok": False, "error": "parking_not_allowed"}), 403
+
+    if not can_subscribe_parking and not sess_user.get("is_admin"):
+        return jsonify({"ok": False, "error": "subscribe_not_allowed"}), 403
+
     if not isinstance(record, dict):
         return jsonify({"ok": False, "error": "no_user_record"}), 400
 
@@ -1135,6 +1536,7 @@ def info():
 
 # ---------------- Admin: news CRUD ----------------
 
+
 def _handle_news_form(existing_post: dict | None):
     title = (request.form.get("title") or "").strip()
     date_str = (request.form.get("date") or "").strip() or date.today().isoformat()
@@ -1235,7 +1637,9 @@ def admin_news_new():
         flash("Новость успешно добавлена.", "success")
         return redirect(url_for("news") + f"#post-{new_id}")
 
-    return render_template("admin_news_new.html", today=date.today().isoformat(), post=None)
+    return render_template(
+        "admin_news_new.html", today=date.today().isoformat(), post=None
+    )
 
 
 @app.route("/admin/news/<int:post_id>/edit", methods=["GET", "POST"])
@@ -1258,7 +1662,11 @@ def admin_news_edit(post_id: int):
         flash("Новость обновлена.", "success")
         return redirect(url_for("news") + f"#post-{post_id}")
 
-    return render_template("admin_news_new.html", today=post.get("date", date.today().isoformat()), post=post)
+    return render_template(
+        "admin_news_new.html",
+        today=post.get("date", date.today().isoformat()),
+        post=post,
+    )
 
 
 @app.route("/admin/news/<int:post_id>/delete", methods=["POST"])
@@ -1295,10 +1703,7 @@ def send_telegram_message(chat_id: str, text: str) -> bool:
         return False
 
     try:
-        data = urlencode({
-            "chat_id": chat_id,
-            "text": text,
-        }).encode("utf-8")
+        data = urlencode({"chat_id": chat_id, "text": text}).encode("utf-8")
         url = f"{TELEGRAM_API_BASE}/sendMessage"
         with urlopen(url, data=data, timeout=5) as resp:
             resp.read()  # просто чтобы запрос завершился
@@ -1309,6 +1714,7 @@ def send_telegram_message(chat_id: str, text: str) -> bool:
 
 
 # ---------------- Admin: invites & registration ----------------
+
 
 @app.route("/admin/invites", methods=["GET", "POST"])
 @login_required
@@ -1344,7 +1750,9 @@ def admin_invites():
     invite_list.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     base_url = request.host_url.rstrip("/")
 
-    return render_template("admin_invites.html", invites=invite_list, base_url=base_url)
+    return render_template(
+        "admin_invites.html", invites=invite_list, base_url=base_url
+    )
 
 
 @app.route("/register/<token>", methods=["GET", "POST"])
@@ -1397,10 +1805,12 @@ def register(token: str):
             old_pin = existing.get("pin_hash")
             old_name = existing.get("name")
             if old_pin:
-                residents.append({
-                    "name": old_name or f"Житель кв. {apartment}",
-                    "pin_hash": old_pin,
-                })
+                residents.append(
+                    {
+                        "name": old_name or f"Житель кв. {apartment}",
+                        "pin_hash": old_pin,
+                    }
+                )
 
         residents.append({"name": name, "pin_hash": hash_pin(pin1)})
         admin = is_admin_for(str(apartment), existing)
