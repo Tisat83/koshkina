@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}Приглашения | Мой дом на Кошкина{% endblock %}
+
+{% block content %}
+<section class="auth-section">
+    <h1>Приглашения для регистрации</h1>
+    <p class="auth-description">
+        Здесь вы можете создавать индивидуальные ссылки для регистрации жильцов.
+        Каждая ссылка привязана к конкретной квартире и может быть использована один раз.
+    </p>
+
+    <form method="post" class="auth-form">
+        <div class="form-group">
+            <label for="apartment">Номер квартиры</label>
+            <input type="text" id="apartment" name="apartment" required />
+        </div>
+        <button type="submit" class="btn-primary">Создать ссылку</button>
+    </form>
+
+    {% if invites %}
+        <h2 style="margin-top: 24px; font-size: 18px;">Созданные приглашения</h2>
+        <div class="info-grid">
+            {% for invite in invites %}
+                <section class="sidebar-card invite-card">
+                    <div class="invite-row">
+                        <span class="invite-label">Квартира</span>
+                        <span class="invite-value">{{ invite.apartment }}</span>
+                    </div>
+                    <div class="invite-row">
+                        <span class="invite-label">Создано</span>
+                        <span class="invite-value">{{ invite.created_at or "—" }}</span>
+                    </div>
+                    <div class="invite-row">
+                        <span class="invite-label">Статус</span>
+                        <span class="invite-value">
+                            {% if invite.used %}использовано{% else %}не использовано{% endif %}
+                        </span>
+                    </div>
+                    {% if not invite.used %}
+                        <div class="invite-row invite-row-link">
+                            <span class="invite-label">Ссылка</span>
+                            <span class="invite-value">
+                                <code class="invite-code">{{ base_url }}/register/{{ invite.token }}</code>
+                            </span>
+                        </div>
+                    {% endif %}
+                </section>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p class="auth-hint" style="margin-top: 16px;">
+            Пока приглашений нет.
+        </p>
+    {% endif %}
+</section>
+{% endblock %}
