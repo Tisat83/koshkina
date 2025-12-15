@@ -19,12 +19,14 @@ jobs:
 
       - name: Copy project to server via rsync
         run: |
-          rsync -avz --delete \
+          rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" \
             --exclude=".git" \
             --exclude="venv" \
-            ./ ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}
+            ./ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}
+
 
       - name: Run simple remote check
         run: |
           ssh -o StrictHostKeyChecking=no \
-            ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} "ls -la ${{ secrets.DEPLOY_PATH }}"
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "ls -la ${{ secrets.DEPLOY_PATH }}"
+
