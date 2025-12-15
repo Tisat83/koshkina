@@ -2,7 +2,7 @@ name: Deploy to server
 
 on:
   push:
-    branches: [ main ]   # если у тебя ветка master — поменяй здесь на master
+    branches: [ master ]   # если у тебя ветка master — поменяй здесь на master
 
 jobs:
   deploy:
