@@ -30,3 +30,12 @@ jobs:
           ssh -o StrictHostKeyChecking=no \
             ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "ls -la ${{ secrets.DEPLOY_PATH }}"
 
+      - name: Install requirements and restart service
+        run: |
+          ssh -o StrictHostKeyChecking=no \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "\
+              cd ${{ secrets.DEPLOY_PATH }} && \
+              source venv/bin/activate && \
+              pip install -r requirements.txt && \
+              sudo systemctl restart koshkina \
+            "
