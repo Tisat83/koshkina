@@ -3,6 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 import os
 import json
+import shutil
+from contextlib import contextmanager
+
+try:
+    import fcntl  # только Linux/macOS
+except Exception:
+    fcntl = None
+
 import secrets
 from functools import wraps
 from datetime import date, datetime
@@ -95,20 +103,86 @@ app.jinja_env.filters["date_ru"] = ru_date
 # ---------------- JSON helpers ----------------
 
 
+@contextmanager
+def _json_lock(path: Path):
+    """
+    Блокировка на время чтения/записи JSON.
+    На Windows fcntl нет — там просто работаем без flock (локальная разработка).
+    """
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_f = lock_path.open("a+", encoding="utf-8")
+    try:
+        if fcntl:
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            if fcntl:
+                fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
+        finally:
+            lock_f.close()
+
+
 def load_json(path: Path, default):
     if not path.exists():
         return default
-    try:
-        with path.open("r", encoding="utf-8") as f:
+
+    def _read(p: Path):
+        with p.open("r", encoding="utf-8") as f:
             return json.load(f)
-    except json.JSONDecodeError:
-        return default
+
+    with _json_lock(path):
+        try:
+            # пустой файл тоже считаем битым
+            if path.stat().st_size == 0:
+                raise json.JSONDecodeError("empty file", "", 0)
+            return _read(path)
+        except (json.JSONDecodeError, OSError):
+            # пробуем восстановиться из .bak
+            bak = path.with_suffix(path.suffix + ".bak")
+            if bak.exists():
+                try:
+                    if bak.stat().st_size == 0:
+                        raise json.JSONDecodeError("empty bak", "", 0)
+                    return _read(bak)
+                except Exception:
+                    pass
+            return default
 
 
 def save_json(path: Path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    with _json_lock(path):
+        bak = path.with_suffix(path.suffix + ".bak")
+        tmp = path.with_suffix(path.suffix + f".tmp.{secrets.token_hex(6)}")
+
+        try:
+            # 1) сначала делаем бэкап текущего файла
+            if path.exists():
+                try:
+                    shutil.copy2(path, bak)
+                except Exception:
+                    pass
+
+            # 2) пишем во временный файл + fsync
+            with tmp.open("w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+
+            # 3) атомарно подменяем
+            os.replace(tmp, path)
+
+        finally:
+            # на всякий случай убираем tmp, если что-то пошло не так
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except Exception:
+                pass
+
 
 
 def load_users() -> dict:
