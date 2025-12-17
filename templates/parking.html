@@ -23,7 +23,41 @@
     data-user-phone="{{ user.get('phone', '') }}"
     data-user-car-number="{{ user.get('car_code') or user.get('car_number', '') }}"
     data-user-can-subscribe="1"
+	data-user-is-guest="{{ '1' if user.get('is_guest') else '0' }}"
+    data-user-guest-status="{{ user.get('guest_status', '') }}"
+
 >
+<div id="guestPendingOverlay" class="guest-pending-overlay" aria-hidden="true">
+  <div class="guest-pending-card">
+    <h2 class="guest-pending-title">Заявка на парковку отправлена</h2>
+    <p class="guest-pending-text">
+      Администратор проверит вашу заявку. Пока заявка не одобрена, парковка будет недоступна.
+    </p>
+    <p class="guest-pending-text">
+      Как только заявка будет одобрена — это окно исчезнет автоматически.
+    </p>
+<div class="guest-pending-status-row">
+  <div class="guest-pending-status" id="guestPendingStatus">В ожидании одобрения…</div>
+
+  <button
+    type="button"
+    class="parking-btn parking-btn-primary"
+    id="guestPendingCheckBtn"
+  >
+    Проверить статус
+  </button>
+</div>
+
+<div class="guest-pending-rejected" id="guestPendingRejected" style="display:none;">
+  <h3 style="margin: 12px 0 6px 0;">Заявка отклонена</h3>
+  <p style="margin: 0; opacity: .92;">
+    Причины могут быть разные, но основная — вашу машину не обнаружили на выбранном вами месте.
+    Подайте заявку ещё раз и убедитесь, что вы указали верное место и номер машины.
+  </p>
+</div>
+
+  </div>
+</div>
 
     <h1>Парковка двора</h1>
     <p class="auth-description">
@@ -266,6 +300,11 @@
             background: rgba(15, 23, 42, 0.9);
             color: #e5e7eb;
         }
+		
+		/* Светлая тема: делаем текст контрастным */
+body:not(.dark-theme) .parking-spot-btn--free { color: #166534; }
+body:not(.dark-theme) .parking-spot-btn--busy { color: #1e40af; }
+
 
         .parking-spots-group-title {
             font-size: 14px;
@@ -523,14 +562,15 @@
         }
 
         .parking-btn-secondary {
-    border-color: rgba(148, 163, 184, 0.7);
-    color: #e5e7eb;
+    border-color: var(--border-color);
+    color: var(--text-color);
     background: transparent;
 }
 
 .parking-btn-secondary:hover {
-    background: rgba(148, 163, 184, 0.08);
+    background: var(--nav-hover-bg);
 }
+
 
         .parking-btn-danger {
             border-color: #b91c1c;
@@ -603,6 +643,41 @@
     margin-top: 8px;
 }
 
+.guest-pending-overlay{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.65);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 6000;
+  padding: 16px;
+}
+.guest-pending-overlay.is-open{ display:flex; }
+
+.guest-pending-card{
+  width: min(560px, 100%);
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow: var(--shadow-soft);
+}
+.guest-pending-title{ margin: 0 0 8px 0; }
+.guest-pending-text{ margin: 6px 0; opacity: .92; }
+.guest-pending-status{ margin-top: 10px; opacity: .85; }
+.guest-pending-status-row{
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* чтобы старый margin-top у .guest-pending-status не ломал выравнивание в строке */
+.guest-pending-status-row .guest-pending-status{
+  margin-top: 0;
+}
 
     </style>
 
@@ -1005,12 +1080,98 @@
             const userPhone = (root.dataset.userPhone || "").trim();
             const userCarNumber = (root.dataset.userCarNumber || "").trim();
 			const canSubscribe = root.dataset.userCanSubscribe === "1";
+			const isGuest = root.dataset.userIsGuest === "1";
+let guestStatus = (root.dataset.userGuestStatus || "").trim().toLowerCase();
+
+const guestOverlay = document.getElementById("guestPendingOverlay");
+const guestStatusEl = document.getElementById("guestPendingStatus");
+const guestCheckBtn = document.getElementById("guestPendingCheckBtn");
+
+function setGuestOverlayVisible(visible){
+  if (!guestOverlay) return;
+  if (visible){
+    guestOverlay.classList.add("is-open");
+    guestOverlay.setAttribute("aria-hidden","false");
+    document.body.style.overflow = "hidden";
+  } else {
+    guestOverlay.classList.remove("is-open");
+    guestOverlay.setAttribute("aria-hidden","true");
+    document.body.style.overflow = "";
+  }
+}
+
+let guestStatusTimer = null;
+
+async function pollGuestApproval(){
+  if (!isGuest) return;
+
+  try{
+    const r = await fetch("/api/guest/status", {
+      headers: { "X-Requested-With":"XMLHttpRequest" }
+    });
+    const d = await r.json().catch(()=> ({}));
+
+    if (!r.ok || !d.ok){
+      if (guestStatusEl) guestStatusEl.textContent = "Не удалось проверить статус. Обновите страницу.";
+      setGuestOverlayVisible(true);
+      return;
+    }
+
+    const st = String(d.status || "pending").toLowerCase();
+    guestStatus = st;
+
+    const rej = document.getElementById("guestPendingRejected");
+
+    if (st === "approved"){
+      if (rej) rej.style.display = "none";
+      setGuestOverlayVisible(false);
+
+      await fetchSpotsAndRefresh();
+
+      if (guestStatusTimer){
+        clearInterval(guestStatusTimer);
+        guestStatusTimer = null;
+      }
+      return;
+    }
+
+    if (st === "rejected"){
+      if (guestStatusEl) guestStatusEl.textContent = "Заявка отклонена.";
+      if (rej) rej.style.display = "block";
+      setGuestOverlayVisible(true);
+      return;
+    }
+
+    // pending / unknown
+    if (guestStatusEl) guestStatusEl.textContent = "Ожидает одобрения администратора…";
+    if (rej) rej.style.display = "none";
+    setGuestOverlayVisible(true);
+
+  } catch(e){
+    if (guestStatusEl) guestStatusEl.textContent = "Ошибка сети при проверке статуса.";
+    setGuestOverlayVisible(true);
+  }
+}
+
+// включаем оверлей сразу, если гость и не approved
+if (isGuest && guestStatus !== "approved") {
+  setGuestOverlayVisible(true);
+  pollGuestApproval();
+  guestStatusTimer = setInterval(pollGuestApproval, 15000);
+}
+if (guestCheckBtn) {
+  guestCheckBtn.addEventListener("click", async () => {
+    if (guestStatusEl) guestStatusEl.textContent = "Проверяем статус…";
+    await pollGuestApproval();
+  });
+}
 
             const modalBackdrop = document.getElementById("parkingModal");
             const modalTitle = document.getElementById("parkingModalTitle");
             const modalStatus = document.getElementById("parkingModalStatus");
             const modalOwner = document.getElementById("parkingModalOwner");
 const modalError = document.getElementById("parkingModalError");
+
 
 // блок с фото + ссылка + сама картинка
 const modalOwnerPhotoBox  = document.getElementById("parkingModalOwnerPhoto");
@@ -1474,8 +1635,8 @@ document.querySelectorAll(".parking-hotspot").forEach((el) => {
                     }
                 });
             });
+fetchSpotsAndRefresh(); // первичная отрисовка занятых мест
 
-            fetchSpotsAndRefresh();
 			// --- Автообновление парковки (чтобы освобождение появлялось без F5) ---
 const AUTO_REFRESH_MS = 30000; // 30 секунд
 let autoRefreshTimer = null;

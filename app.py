@@ -735,22 +735,29 @@ def admin_guests():
 
                             # если место свободно — занимаем его гостем
                             if not spots_state.get(sid):
-                                spots_state[sid] = {
-    "occupied": True,
-    "apartment": "Гость",
-    "guest_id": g.get("id"),
-    "name": g.get("name"),
-    "phone": g.get("phone"),
-    "car_number": g.get("car_number"),
-    "until": (g.get("until") or ""),
-    "is_long": False,
-    "show_phone": True,
-    "guest_photo": g.get("photo") or None,
-    "updated_at": datetime.now().isoformat(timespec="seconds"),
-}
 
+                                guest_id = g.get("id")
+                                guest_apartment = f"g{guest_id}" if guest_id else "гость"
+
+                                spots_state[sid] = {
+                                    "occupied": True,
+                                    "apartment": guest_apartment,          # теперь гость = владелец
+                                    "guest_id": guest_id,
+                                    "is_guest": True,
+
+                                    "name": (g.get("name") or "").strip(),
+                                    "phone": (g.get("phone") or "").strip(),
+                                    "car_code": (g.get("car_number") or "").strip(),
+                                    "until": (g.get("until") or ""),
+
+                                    "long_term": False,
+                                    "show_phone": True,
+                                    "guest_photo": g.get("photo") or "",
+                                    "updated_at": datetime.utcnow().isoformat(timespec="minutes"),
+                                }
 
                                 save_parking_state(state)
+
                             else:
                                 flash(
                                     f"Заявка гостя №{guest_id} одобрена, "
@@ -903,7 +910,21 @@ def parking_guest_register():
             pass
 
     # фронт ждёт JSON
-    return jsonify({"ok": True, "guest_id": new_id, "status": "pending"})
+        # Автологин гостя сразу после отправки заявки (даже если pending)
+    session["user"] = {
+        "apartment": f"g{new_id}",
+        "name": (name or "Гость").strip(),
+        "is_admin": False,
+        "is_guest": True,
+        "guest_id": new_id,
+        "guest_status": "pending",
+        # для предзаполнения на парковке
+        "phone": phone,
+        "car_code": (car_number or "").strip(),
+    }
+
+    return jsonify({"ok": True, "guest_id": new_id, "status": "pending", "redirect": url_for("parking")})
+
 
 @app.route("/api/guest/login", methods=["POST"])
 def api_guest_login():
@@ -981,22 +1002,22 @@ def api_guest_login():
             403,
         )
 
-    approved_pin_ok = [g for g in pin_ok if _status(g) == "approved"]
-    if not approved_pin_ok:
-        # PIN верный, но ни одна заявка с этим PIN ещё не одобрена
+    # Разрешаем вход и для pending — доступ к парковке ограничим оверлеем на /parking
+    pin_ok.sort(key=_sort_key, reverse=True)
+    guest = pin_ok[0]
+
+    status = (_status(guest) or "pending").strip().lower()
+    if status == "rejected":
         return (
             jsonify(
                 {
                     "ok": False,
-                    "error": "guest_not_approved",
-                    "message": "Заявка ещё не одобрена администратором. Войти можно после одобрения.",
+                    "error": "guest_rejected",
+                    "message": "Заявка была отклонена администратором. Подайте заявку снова.",
                 }
             ),
             403,
         )
-
-    approved_pin_ok.sort(key=_sort_key, reverse=True)
-    guest = approved_pin_ok[0]
 
 
     guest_id = guest.get("id")
@@ -1014,6 +1035,8 @@ def api_guest_login():
         "is_admin": False,
         "is_guest": True,
         "guest_id": guest_id,
+        "guest_status": status,
+
         # полезно для предзаполнения на парковке
         "phone": guest_phone,
         "car_code": guest_car,
@@ -1028,6 +1051,51 @@ def api_guest_login():
             "redirect": url_for("parking"),
         }
     )
+
+@app.route("/api/guest/status")
+@login_required
+def api_guest_status():
+    """
+    Возвращает статус текущего гостя (pending/approved/rejected).
+    Используется для модального оверлея на /parking.
+    """
+    u = session.get("user") or {}
+    if not u.get("is_guest"):
+        return jsonify({"ok": False, "error": "not_guest"}), 403
+
+    guest_id = u.get("guest_id")
+    phone = (u.get("phone") or "").strip()
+
+    guests_data = load_guests()
+    guests = guests_data.get("guests") or []
+
+    def _status(g):
+        return (g.get("status") or "pending").strip().lower()
+
+    found = None
+
+    # 1) пытаемся найти по guest_id
+    if guest_id is not None:
+        for g in guests:
+            if str(g.get("id")) == str(guest_id):
+                found = g
+                break
+
+    # 2) запасной вариант — по телефону (если вдруг id нет)
+    if not found and phone:
+        phone_norm = normalize_phone(phone)
+        for g in guests:
+            if normalize_phone(g.get("phone")) == phone_norm:
+                found = g
+                break
+
+    status = _status(found) if found else "pending"
+
+    # Обновляем сессию (важно для /api/parking/spots и для кнопок)
+    u["guest_status"] = status
+    session["user"] = u
+
+    return jsonify({"ok": True, "status": status, "approved": status == "approved"})
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -1406,6 +1474,10 @@ def api_parking_spots():
         occupant = sstate or None
         if not can_use_parking:
             occupant = None
+                    # Pending-гость не должен видеть детали занятости
+        if sess_user.get("is_guest") and (sess_user.get("guest_status") or "pending") != "approved":
+            occupant = None
+
 
         merged.append({
             "id": spot.get("id"),
@@ -1432,6 +1504,9 @@ def api_parking_occupy(spot_id: int):
     """
     sess_user, apartment, _, can_use_parking, _ = current_user_parking_flags()
     user = sess_user
+    if user.get("is_guest") and (user.get("guest_status") or "pending") != "approved":
+        return jsonify({"ok": False, "error": "guest_not_approved"}), 403
+
     if not apartment:
         return jsonify({"ok": False, "error": "no_user"}), 400
 
@@ -1537,6 +1612,9 @@ def api_parking_free(spot_id: int):
     sess_user, apartment, _, can_use_parking, _ = current_user_parking_flags()
     user = sess_user
     is_admin = bool(user.get("is_admin"))
+    if user.get("is_guest") and (user.get("guest_status") or "pending") != "approved":
+        return jsonify({"ok": False, "error": "guest_not_approved"}), 403
+
 
     if not apartment:
         return jsonify({"ok": False, "error": "no_user"}), 400

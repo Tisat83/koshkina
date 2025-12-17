@@ -301,6 +301,37 @@
         opacity: 0.9;
         min-height: 1.2em;
     }
+.guest-success-backdrop{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.6);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 5000;
+  padding: 16px;
+}
+.guest-success-backdrop.is-open{ display:flex; }
+
+.guest-success-modal{
+  width: min(520px, 100%);
+  background: var(--card-bg, #111827);
+  color: var(--text-color, #fff);
+  border: 1px solid var(--border-color, rgba(255,255,255,.12));
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: var(--shadow-soft, 0 10px 30px rgba(0,0,0,.35));
+}
+.guest-success-close{
+  margin-top: 12px;
+  width: 100%;
+  border-radius: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, rgba(255,255,255,.12));
+  background: var(--chip-bg, rgba(255,255,255,.08));
+  color: inherit;
+  cursor: pointer;
+}
 
 </style>
 
@@ -593,22 +624,18 @@
         </form>
     </div>
 </div>
-<!-- Модалка “Заявка отправлена” (вместо alert) -->
-<div class="guest-form-modal-backdrop" id="guestSuccessModal" aria-hidden="true">
-  <div class="guest-form-modal">
-    <button type="button" class="guest-form-modal-close" id="guestSuccessModalClose">&times;</button>
-
-    <h2>Заявка отправлена</h2>
-    <p>
-      Администратор получит уведомление и проверит, что вы действительно припарковались во дворе.<br><br>
-      Как только админ одобрит заявку — ваша машина появится на парковке, и вы сможете войти по телефону и PIN.
+<!-- Модалка: заявка отправлена -->
+<div class="guest-success-backdrop" id="guestSuccessModal" aria-hidden="true">
+  <div class="guest-success-modal">
+    <h3>Заявка отправлена</h3>
+    <p id="guestSuccessText">
+      Администратор получит уведомление и проверит, что вы действительно припарковались во дворе.
+      Как только заявка будет одобрена, вы сможете пользоваться парковкой.
     </p>
-
-    <div class="guest-form-footer">
-      <button type="button" class="btn-primary" id="guestSuccessOkBtn">Закрыть</button>
-    </div>
+    <button type="button" class="guest-success-close" id="guestSuccessClose">Перейти на парковку</button>
   </div>
 </div>
+
 
 <script>
     document.addEventListener("DOMContentLoaded", () => {
@@ -722,11 +749,26 @@ if (successOkBtn) successOkBtn.addEventListener("click", closeSuccessModal);
 
                     const data = await resp.json();
 
-                    if (data && data.ok) {
-                        openSuccessModal();
-                        guestForm.reset();
-                        closeForm();
-                    } else {
+if (data && data.ok) {
+    const redirectUrl = data.redirect || "/parking";
+
+    openSuccessModal();
+    guestForm.reset();
+    closeForm();
+
+    // Кнопка "Перейти на парковку" уже есть — привязываем редирект к ней
+    const btn = document.getElementById("guestSuccessClose");
+    if (btn) {
+        btn.onclick = () => {
+            closeSuccessModal();
+            window.location.href = redirectUrl;
+        };
+    } else {
+        // запасной вариант: если кнопка не найдена, редирект через 1.2 сек
+        setTimeout(() => { window.location.href = redirectUrl; }, 1200);
+    }
+} else {
+
                         alert("Не удалось отправить заявку. Попробуйте ещё раз чуть позже.");
                     }
                 } catch (err) {
@@ -773,11 +815,6 @@ if (successOkBtn) successOkBtn.addEventListener("click", closeSuccessModal);
     } else {
         window.location.reload();
     }
-    return;
-
-						    // Обновляем UI сразу: у гостя появится шапка/меню из base.html
-    // и при этом логично перекинуть на саму парковку.
-    window.location.href = (data && data.redirect) ? data.redirect : "/parking";
     return;
 
                     } else {
