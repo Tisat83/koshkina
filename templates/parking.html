@@ -1476,6 +1476,35 @@ document.querySelectorAll(".parking-hotspot").forEach((el) => {
             });
 
             fetchSpotsAndRefresh();
+			// --- Автообновление парковки (чтобы освобождение появлялось без F5) ---
+const AUTO_REFRESH_MS = 30000; // 30 секунд
+let autoRefreshTimer = null;
+
+function startAutoRefresh() {
+    if (autoRefreshTimer) return;
+    autoRefreshTimer = setInterval(() => {
+        if (document.visibilityState !== "visible") return;
+        fetchSpotsAndRefresh();
+    }, AUTO_REFRESH_MS);
+}
+
+function stopAutoRefresh() {
+    if (!autoRefreshTimer) return;
+    clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+}
+
+// Когда возвращаемся на вкладку — сразу подтянуть актуальное состояние
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+        fetchSpotsAndRefresh();
+    }
+});
+
+window.addEventListener("beforeunload", stopAutoRefresh);
+
+startAutoRefresh();
+
 
             // Закрываем модалку только по кнопкам "X" и "Отмена"
             modalBackdrop.addEventListener("click", (e) => {
