@@ -262,6 +262,54 @@ def save_guests(data: dict):
         data["guests"] = []
     save_json(GUESTS_FILE, data)
 
+def normalize_phone(raw: str) -> str:
+    """
+    Нормализуем телефон к виду 7XXXXXXXXXX (только цифры).
+    Принимаем +7, 8, 7, 10-значные.
+    """
+    s = "".join(ch for ch in str(raw or "") if ch.isdigit())
+    if len(s) == 11 and s.startswith("8"):
+        s = "7" + s[1:]
+    if len(s) == 10:
+        s = "7" + s
+    return s
+
+def find_guest_by_phone(phone: str):
+    """
+    Поиск гостя по телефону.
+    Важно: если по этому телефону есть хотя бы один approved-гость — возвращаем его (самый свежий).
+    Иначе возвращаем самый свежий любой статус (pending/rejected), чтобы логин корректно сказал "не одобрено".
+    """
+    phone_norm = normalize_phone(phone)
+    guests_data = load_guests()
+    guests = guests_data.get("guests") or []
+
+    matches = []
+    for g in guests:
+        if normalize_phone(g.get("phone")) == phone_norm:
+            matches.append(g)
+
+    if not matches:
+        return None
+
+    def _sort_key(g):
+        created_at = g.get("created_at") or ""
+        try:
+            gid = int(g.get("id") or 0)
+        except Exception:
+            gid = 0
+        return (created_at, gid)
+
+    approved = []
+    for g in matches:
+        status = (g.get("status") or "").strip().lower()
+        if status == "approved":
+            approved.append(g)
+
+    pool = approved or matches
+    pool.sort(key=_sort_key, reverse=True)
+    return pool[0]
+
 
 # ---------------- Sidebar visibility ----------------
 
@@ -456,12 +504,32 @@ def current_user_parking_flags():
     if not isinstance(record, dict):
         record = {}
     is_admin = bool(sess_user.get("is_admin"))
-    # по умолчанию парковка разрешена всем, админ всегда может
-    can_use_parking = bool(record.get("can_use_parking", True) or is_admin)
-    # подписки по умолчанию выключены, но админ может всё
+    is_guest = bool(sess_user.get("is_guest"))
+
+    # Гостю (пока) даём доступ к парковке через сессию, без users.json
+    if is_guest:
+        can_use_parking = True
+        can_subscribe_parking = False
+        return sess_user, apartment, record, can_use_parking, can_subscribe_parking
+
+    # Жильцы: доступ только если can_use_parking=true (или админ)
+    can_use_parking = bool(record.get("can_use_parking", False) or is_admin)
     can_subscribe_parking = bool(record.get("can_subscribe_parking", False) or is_admin)
     return sess_user, apartment, record, can_use_parking, can_subscribe_parking
 
+@app.context_processor
+def inject_nav_flags():
+    """
+    Флаги для навигации в base.html.
+    """
+    try:
+        _, _, _, can_use_parking, _ = current_user_parking_flags()
+    except Exception:
+        can_use_parking = False
+
+    return {
+        "nav_can_use_parking": bool(can_use_parking),
+    }
 
 # ---------------- Pagination ----------------
 
@@ -482,7 +550,10 @@ def paginate(items: list, page: int, per_page: int):
 
 @app.route("/")
 def index():
+    if (session.get("user") or {}).get("is_guest"):
+        return redirect(url_for("parking"))
     posts = load_posts()
+
     public_posts = [
         p for p in posts if bool(p.get("is_public")) and not bool(p.get("is_archived"))
     ]
@@ -591,23 +662,19 @@ def admin_guests():
                             # если место свободно — занимаем его гостем
                             if not spots_state.get(sid):
                                 spots_state[sid] = {
-    # помечаем, что это гость, чтобы фронт не писал "Неизвестно"
-    "apartment": "гость",
-    "name": g.get("name") or "",
-    "car_code": g.get("car_number") or "",
-    "phone": g.get("phone") or "",
+    "occupied": True,
+    "apartment": "Гость",
+    "guest_id": g.get("id"),
+    "name": g.get("name"),
+    "phone": g.get("phone"),
+    "car_number": g.get("car_number"),
+    "until": (g.get("until") or ""),
+    "is_long": False,
     "show_phone": True,
-    "until": "",            # пока без времени
-    "long_term": False,
-    "updated_at": datetime.utcnow().isoformat(
-        timespec="minutes"
-    ),
-    "guest_photo": g.get("photo") or "",
-    "telegram_chat_id": "",
-    "is_guest": True,
-    # <<< НОВОЕ: путь к фото гостя (из guests.json)
-            "guest_photo": g.get("photo") or "",
+    "guest_photo": g.get("photo") or None,
+    "updated_at": datetime.now().isoformat(timespec="seconds"),
 }
+
 
                                 save_parking_state(state)
                             else:
@@ -658,6 +725,20 @@ def parking_guest_register():
     comment = (request.form.get("comment") or "").strip()
     spot_id_raw = (request.form.get("spot_id") or "").strip()
     until_raw = (request.form.get("until") or "").strip()  # datetime-local из формы
+    # --- PIN гостя (для будущего входа через сайт/бота) ---
+    pin1 = (request.form.get("pin1") or "").strip()
+    pin2 = (request.form.get("pin2") or "").strip()
+    pin_hash = None
+
+    if pin1 or pin2:
+        # оба поля должны быть заполнены одинаково
+        if pin1 != pin2:
+            return jsonify({"ok": False, "error": "pin_mismatch"}), 400
+
+        if not pin1.isdigit() or not (4 <= len(pin1) <= 8):
+            return jsonify({"ok": False, "error": "bad_pin_format"}), 400
+
+        pin_hash = hash_pin(pin1)
 
     # --- Номер места ---
     try:
@@ -701,6 +782,7 @@ def parking_guest_register():
         "comment": comment,
         "status": "pending",
         "photo": photo_rel_path,  # сюда кладём путь к фото
+        "pin_hash": pin_hash,     # храним хеш PIN гостя (может быть None)
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "source": "site",
     }
@@ -748,6 +830,130 @@ def parking_guest_register():
 
     # фронт ждёт JSON
     return jsonify({"ok": True, "guest_id": new_id, "status": "pending"})
+
+@app.route("/api/guest/login", methods=["POST"])
+def api_guest_login():
+    """
+    Логин гостя по телефону + PIN.
+
+    Ожидает JSON:
+    {
+      "phone": "+79991234567",
+      "pin": "1234"
+    }
+    """
+    data = request.get_json(silent=True) or {}
+
+    phone = (data.get("phone") or "").strip()
+    secret = (data.get("pin") or data.get("pin_code") or "").strip()
+
+    if not phone or not secret:
+        return (
+            jsonify(
+                {"ok": False, "error": "missing_phone_or_pin", "message": "Нужны телефон и PIN"}
+            ),
+            400,
+        )
+
+    # Ищем ВСЕ заявки этого телефона и проверяем PIN по ним.
+    guests_data = load_guests()
+    guests = guests_data.get("guests") or []
+    phone_norm = normalize_phone(phone)
+
+    matches = []
+    for g in guests:
+        if normalize_phone(g.get("phone")) == phone_norm:
+            matches.append(g)
+
+    if not matches:
+        return (
+            jsonify(
+                {"ok": False, "error": "guest_not_found", "message": "Гость с таким телефоном не найден"}
+            ),
+            404,
+        )
+
+
+    def _sort_key(g):
+        created_at = g.get("created_at") or ""
+        try:
+            gid = int(g.get("id") or 0)
+        except Exception:
+            gid = 0
+        return (created_at, gid)
+
+    def _status(g):
+        return (g.get("status") or "").strip().lower()
+
+    def _pin_ok(g):
+        h = g.get("pin_hash")
+        return bool(h) and check_pin(secret, h)
+
+    pin_ok = [g for g in matches if _pin_ok(g)]
+
+    # Если у всех записей нет PIN — отдельная ошибка
+    if not pin_ok:
+        if all(not (g.get("pin_hash") or "") for g in matches):
+            return (
+                jsonify(
+                    {"ok": False, "error": "pin_not_set", "message": "Для этого гостя ещё не задан PIN"}
+                ),
+                400,
+            )
+        return (
+            jsonify(
+                {"ok": False, "error": "wrong_pin", "message": "Неверный PIN"}
+            ),
+            403,
+        )
+
+    approved_pin_ok = [g for g in pin_ok if _status(g) == "approved"]
+    if not approved_pin_ok:
+        # PIN верный, но ни одна заявка с этим PIN ещё не одобрена
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "guest_not_approved",
+                    "message": "Заявка ещё не одобрена администратором. Войти можно после одобрения.",
+                }
+            ),
+            403,
+        )
+
+    approved_pin_ok.sort(key=_sort_key, reverse=True)
+    guest = approved_pin_ok[0]
+
+
+    guest_id = guest.get("id")
+    guest_name = (guest.get("name") or "Гость").strip()
+    guest_phone = (guest.get("phone") or phone).strip()
+    guest_car = (guest.get("car_number") or "").strip()
+
+    # ВАЖНО: apartment должен быть непустым, иначе /parking вас не пустит
+    # Делаем уникальный ключ на гостя, чтобы работало правило "1 пользователь = 1 место"
+    guest_apartment = f"g{guest_id}" if guest_id else f"g{secrets.token_hex(3)}"
+
+    session["user"] = {
+        "apartment": guest_apartment,
+        "name": guest_name,
+        "is_admin": False,
+        "is_guest": True,
+        "guest_id": guest_id,
+        # полезно для предзаполнения на парковке
+        "phone": guest_phone,
+        "car_code": guest_car,
+    }
+
+    return jsonify(
+        {
+            "ok": True,
+            "guest_id": guest_id,
+            "name": guest_name,
+            "phone": guest_phone,
+            "redirect": url_for("parking"),
+        }
+    )
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -852,6 +1058,31 @@ def profile():
     users = load_users()
     sess_user = session.get("user") or {}
     apartment = (sess_user.get("apartment") or "").strip()
+    # --- Гость: показываем профиль из session (не из users.json) ---
+    if bool(sess_user.get("is_guest")):
+        guest_phone = (sess_user.get("phone") or "").strip()
+        guest_car = (sess_user.get("car_code") or "").strip()
+        guest_name = (sess_user.get("name") or "").strip()
+
+        if request.method == "POST":
+            flash("Профиль гостя пока нельзя редактировать на сайте.", "info")
+            return redirect(url_for("profile"))
+
+        return render_template(
+            "profile.html",
+            is_guest=True,
+            guest_id=sess_user.get("guest_id"),
+            login_value=guest_phone or "",
+            apartment=apartment,          # технический ключ (g17)
+            last_name="",
+            first_name=guest_name,
+            middle_name="",
+            phone1=guest_phone,
+            phone2="",
+            car_number=guest_car,
+            can_use_parking=True,
+            can_subscribe_parking=False,
+        )
 
     if not apartment:
         flash("Не удалось определить квартиру.", "error")
@@ -1377,7 +1608,10 @@ def api_parking_unsubscribe(spot_id: int):
 @app.route("/news", methods=["GET", "POST"])
 @login_required
 def news():
+    if (session.get("user") or {}).get("is_guest"):
+        return redirect(url_for("parking"))
     posts_all = load_posts()
+
     active_posts = [p for p in posts_all if not bool(p.get("is_archived"))]
     posts_sorted = sorted(active_posts, key=lambda p: p.get("date", ""), reverse=True)
 
@@ -1440,6 +1674,8 @@ def news():
 @app.route("/news/archive")
 @login_required
 def news_archive():
+    if (session.get("user") or {}).get("is_guest"):
+        return redirect(url_for("parking"))
     posts_all = load_posts()
     archived = [p for p in posts_all if bool(p.get("is_archived"))]
     posts_sorted = sorted(archived, key=lambda p: p.get("date", ""), reverse=True)
@@ -1492,6 +1728,8 @@ def news_archive():
 @app.route("/news/<int:post_id>/react", methods=["POST"])
 @login_required
 def react(post_id: int):
+    if (session.get("user") or {}).get("is_guest"):
+        return redirect(url_for("parking"))
     emoji = (request.form.get("emoji") or "").strip()
     if emoji not in REACTION_EMOJIS:
         return redirect(url_for("news"))
@@ -1530,7 +1768,10 @@ def react(post_id: int):
 @app.route("/info")
 @login_required
 def info():
+    if (session.get("user") or {}).get("is_guest"):
+        return redirect(url_for("parking"))
     items = get_sidebar_items("news", limit=0)
+
     return render_template("info.html", items=items)
 
 

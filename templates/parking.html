@@ -1,6 +1,18 @@
 {% extends "base.html" %}
 
-{% block title %}Парковка двора | Мой дом на Кошкина{% endblock %}
+{% block title %}Парковка{% endblock %}
+{% block head_extra %}
+<link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='icons/parking-180.png') }}?v=1">
+<link rel="apple-touch-icon" sizes="167x167" href="{{ url_for('static', filename='icons/parking-167.png') }}?v=1">
+<link rel="apple-touch-icon" sizes="152x152" href="{{ url_for('static', filename='icons/parking-152.png') }}?v=1">
+<link rel="apple-touch-icon" sizes="120x120" href="{{ url_for('static', filename='icons/parking-120.png') }}?v=1">
+<link rel="apple-touch-icon" sizes="76x76"  href="{{ url_for('static', filename='icons/parking-76.png') }}?v=1">
+
+<meta name="apple-mobile-web-app-title" content="Парковка">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+{% endblock %}
+
 
 {% block content %}
 <section
@@ -530,6 +542,40 @@
             font-size: 12px;
             color: var(--muted-text-2);
         }
+/* --- Позвонить + таймер до конца брони (в модалке) --- */
+.parking-call-link{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin-left:8px;
+  width:28px;
+  height:28px;
+  border-radius:999px;
+  background: rgba(34,197,94,0.15);
+  border: 1px solid rgba(34,197,94,0.35);
+  text-decoration:none;
+  font-size:16px;
+  line-height:1;
+}
+.parking-call-link:hover{ background: rgba(34,197,94,0.25); }
+.parking-call-link span{ color:#22c55e; }
+
+.parking-until-row{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.parking-until-countdown{
+  margin-left:auto;
+  font-variant-numeric: tabular-nums;
+  font-weight:600;
+  opacity:0.9;
+  background: rgba(148,163,184,0.12);
+  border:1px solid rgba(148,163,184,0.25);
+  border-radius:999px;
+  padding:3px 10px;
+}
+.parking-clock-icon{ opacity:0.9; }
 
         .parking-modal-error {
             font-size: 12px;
@@ -992,6 +1038,72 @@ const modalOwnerPhotoImg  = document.getElementById("parkingModalOwnerPhotoImg")
                 inputUntil.addEventListener("click", openPicker);
                 inputUntil.addEventListener("focus", openPicker);
             }
+let untilCountdownTimer = null;
+
+function escapeHtml(str){
+  return String(str ?? "")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
+
+function normalizeTelHref(phone){
+  const s = String(phone || "").trim();
+  const cleaned = s.replace(/[^\d+]/g, "");
+  return cleaned || s;
+}
+
+function parseIsoLocal(untilStr){
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(String(untilStr || ""));
+  if (!m) return null;
+  const dt = new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5], 0, 0);
+  if (Number.isNaN(dt.getTime())) return null;
+  return dt;
+}
+
+function formatDateTimeRu(untilStr){
+  const dt = parseIsoLocal(untilStr);
+  if (!dt) return null;
+  const dd = String(dt.getDate()).padStart(2,"0");
+  const mm = String(dt.getMonth()+1).padStart(2,"0");
+  const yyyy = dt.getFullYear();
+  const hh = String(dt.getHours()).padStart(2,"0");
+  const mi = String(dt.getMinutes()).padStart(2,"0");
+  return { date:`${dd}.${mm}.${yyyy}`, time:`${hh}:${mi}`, ts: dt.getTime() };
+}
+
+function stopUntilCountdown(){
+  if (untilCountdownTimer){
+    clearInterval(untilCountdownTimer);
+    untilCountdownTimer = null;
+  }
+}
+
+function startUntilCountdown(untilStr){
+  stopUntilCountdown();
+  const parts = formatDateTimeRu(untilStr);
+  if (!parts) return;
+  const el = document.getElementById("parkingUntilCountdown");
+  if (!el) return;
+
+  function tick(){
+    const diff = parts.ts - Date.now();
+    if (diff <= 0){
+      el.textContent = "00:00";
+      stopUntilCountdown();
+      return;
+    }
+    const totalMin = Math.max(0, Math.ceil(diff / 60000));
+    const hh = String(Math.floor(totalMin / 60)).padStart(2,"0");
+    const mm = String(totalMin % 60).padStart(2,"0");
+    el.textContent = `${hh}:${mm}`;
+  }
+
+  tick();
+  untilCountdownTimer = setInterval(tick, 15000);
+}
 
             function formatUntilText(untilStr) {
                 if (!untilStr) {
@@ -1022,10 +1134,12 @@ const modalOwnerPhotoImg  = document.getElementById("parkingModalOwnerPhotoImg")
                 } else {
                     const d = String(dt.getDate()).padStart(2, "0");
                     const m = String(dt.getMonth() + 1).padStart(2, "0");
-                    dayPart = `${d}.${m}`;
+                    const y = dt.getFullYear();
+                    dayPart = `${d}.${m}.${y}`;
+
                 }
 
-                return `Занято до ${dayPart} ${timeStr}`;
+                return `Занято до ${dayPart} 🕒 ${timeStr}`;
             }
 
             function openModalForSpot(el, spotData) {
@@ -1044,7 +1158,12 @@ const modalOwnerPhotoImg  = document.getElementById("parkingModalOwnerPhotoImg")
 
                if (occ) {
     let who;
-    if (occ.apartment && occ.apartment.toLowerCase() === "гость") {
+
+    if (
+        occ.is_guest ||
+        (occ.apartment && String(occ.apartment).toLowerCase() === "гость") ||
+        (occ.apartment && /^g\d+$/i.test(String(occ.apartment)))
+    ) {
         const guestName = (occ.name || "").trim();
         who = guestName ? `Гость ${guestName}` : "Гость";
     } else if (occ.apartment) {
@@ -1053,27 +1172,51 @@ const modalOwnerPhotoImg  = document.getElementById("parkingModalOwnerPhotoImg")
         who = "Неизвестно";
     }
 
-    const untilText = occ.until ? ` до ${occ.until.replace("T", " ")}` : "";
-    const longText = longTerm ? " (надолго)" : "";
-    modalStatus.textContent = `Занято${untilText}${longText}`;
-    modalOwner.textContent =
-        `${who}` +
-        (occ.car_code ? `, авто ${occ.car_code}` : "") +
-        (occ.phone ? `, тел. ${occ.phone}` : "");
+    const car = (occ.car_code || occ.car_number || "").trim();
+    const phone = (occ.phone || "").trim();
+
+    // --- СТАТУС (с таймером справа) ---
+    if (longTerm) {
+        stopUntilCountdown();
+        modalStatus.textContent = "Занято (надолго)";
+    } else if (occ.until) {
+        modalStatus.innerHTML =
+            `<div class="parking-until-row">` +
+            `<span>${escapeHtml(formatUntilText(occ.until))}</span>` +
+            `<span id="parkingUntilCountdown" class="parking-until-countdown"></span>` +
+            `</div>`;
+        startUntilCountdown(occ.until);
+    } else {
+        stopUntilCountdown();
+        modalStatus.textContent = "Занято";
+    }
+
+    // --- ВЛАДЕЛЕЦ (телефон + кнопка звонка 📞) ---
+    const phoneText = phone ? `, тел. ${escapeHtml(phone)}` : "";
+    const carText = car ? `, авто ${escapeHtml(car)}` : "";
+    const callBtn = phone
+        ? ` <a class="parking-call-link" href="tel:${escapeHtml(normalizeTelHref(phone))}" title="Позвонить"><span>📞</span></a>`
+        : "";
+
+    modalOwner.innerHTML = `${escapeHtml(who)}${carText}${phoneText}${callBtn}`;
 } else {
+    stopUntilCountdown();
     modalStatus.textContent = "Свободно";
     modalOwner.textContent = "Место свободно.";
 }
 
-
 // показать / скрыть фото гостя
 if (modalOwnerPhotoBox && modalOwnerPhotoImg && modalOwnerPhotoLink) {
     if (
-        occ &&
-        occ.apartment &&
-        occ.apartment.toLowerCase() === "гость" &&
-        occ.guest_photo
-    ) {
+    occ &&
+    (
+        occ.is_guest ||
+        (occ.apartment && /^g\d+$/i.test(String(occ.apartment))) ||
+        (occ.apartment && String(occ.apartment).toLowerCase() === "гость")
+    ) &&
+    occ.guest_photo
+) {
+
         let src = occ.guest_photo;
 
         // если путь относительный — добавляем /static/
@@ -1136,7 +1279,8 @@ inputShowPhone.checked = true;
 // если место уже занято — всегда показываем данные текущего владельца
 if (occ) {
     if (occ.until) inputUntil.value = occ.until.slice(0, 16); // datetime-local
-    if (occ.car_code) inputCarCode.value = occ.car_code;
+    const occCarLabel = (occ.car_code || occ.car_number || "").trim();
+	if (occCarLabel) inputCarCode.value = occCarLabel;
     if (occ.phone) inputPhone.value = occ.phone;
     inputShowPhone.checked = Boolean(occ.show_phone);
 
@@ -1157,7 +1301,7 @@ if (occ) {
                     btnFree.style.display = "inline-block";
                     btnSave.textContent = occupiedByMe ? "Обновить данные" : "Занять место (как админ)";
                 } else if (readOnly) {
-                    modalOwner.textContent += " Изменять это место может только владелец или администратор.";
+                    modalOwner.insertAdjacentText("beforeend", " Изменять это место может только владелец или администратор.");
                 } else {
                     btnSave.textContent = "Занять место";
                 }
@@ -1169,6 +1313,7 @@ if (occ) {
     modalBackdrop.classList.remove("is-open");
     currentSpotId = null;
     currentSpotData = null;
+	stopUntilCountdown();
 
     // Прячем кнопку подписки при закрытии
     if (btnSubscribe) {
@@ -1230,7 +1375,12 @@ document.querySelectorAll(".parking-hotspot").forEach((el) => {
         }
 
             let who;
-    if (occ.apartment && occ.apartment.toLowerCase() === "гость") {
+    if (
+    occ.is_guest ||
+    (occ.apartment && /^g\d+$/i.test(String(occ.apartment))) ||
+    (occ.apartment && String(occ.apartment).toLowerCase() === "гость")
+) {
+
         const guestName = (occ.name || "").trim();
         who = guestName ? `Гость ${guestName}` : "Гость";
     } else if (occ.apartment) {

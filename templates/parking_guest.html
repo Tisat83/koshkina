@@ -271,6 +271,37 @@
             font-size: 1rem;
         }
     }
+	    /* --- Вход гостя --- */
+    .guest-login-card {
+        margin-top: 1rem;
+        padding: 1rem;
+        border: 1px solid var(--border-color);
+        border-radius: 0.9rem;
+        background: var(--card-bg);
+    }
+
+    .guest-login-title {
+        margin: 0 0 0.75rem;
+        font-size: 1.05rem;
+    }
+
+    .guest-login-form {
+        display: grid;
+        gap: 0.75rem;
+    }
+
+    .guest-login-actions {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+    }
+
+    .guest-login-msg {
+        font-size: 0.95rem;
+        opacity: 0.9;
+        min-height: 1.2em;
+    }
+
 </style>
 
 <section class="info-section parking-section parking-guest">
@@ -336,6 +367,49 @@
                 Через Telegram обычно быстрее: бот сам подскажет шаги и отправит уведомления.
                 Через сайт заявка попадёт администратору дома на ручное подтверждение.
             </p>
+			{% if not session.get('user') %}
+			<div class="guest-login-card">
+    <h3 class="guest-login-title">Уже регистрировались? Войти по телефону и PIN</h3>
+
+    <form id="guestLoginForm" class="guest-login-form">
+        <div>
+            <label class="guest-field-label" for="guest-login-phone">Телефон</label>
+            <input
+                id="guest-login-phone"
+                name="phone"
+                type="tel"
+                class="guest-input"
+                placeholder="+7..."
+                required
+            >
+        </div>
+
+        <div>
+            <label class="guest-field-label" for="guest-login-pin">PIN</label>
+            <input
+                id="guest-login-pin"
+                name="pin"
+                type="password"
+                inputmode="numeric"
+                pattern="\d*"
+                class="guest-input"
+                placeholder="4–8 цифр"
+                required
+            >
+        </div>
+
+        <div class="guest-login-actions">
+            <button type="submit" class="btn-secondary">Войти</button>
+        </div>
+
+        <div class="guest-login-msg" id="guestLoginMsg" aria-live="polite"></div>
+    </form>
+
+    <div class="guest-helper">
+        Если PIN забыли — проще всего снова подать заявку и указать новый PIN (мы это позже улучшим).
+    </div>
+</div>
+{% endif %}
         </article>
     </div>
 </section>
@@ -406,7 +480,37 @@
                         name="car_number"
                         type="text"
                         class="guest-input"
-                        placeholder="Например: C070ET197"
+                        placeholder="Например: А343ET197"
+                        required
+                    >
+                </div>
+                <div>
+                    <label class="guest-field-label" for="guest-pin1">Придумайте PIN (4–8 цифр)</label>
+                    <input
+                        id="guest-pin1"
+                        name="pin1"
+                        type="password"
+                        inputmode="numeric"
+                        pattern="\d*"
+                        class="guest-input"
+                        placeholder="Например: 1234"
+                        required
+                    >
+                    <div class="guest-helper">
+                        PIN понадобится вам и в Telegram-боте, и при следующих бронированиях.
+                    </div>
+                </div>
+
+                <div>
+                    <label class="guest-field-label" for="guest-pin2">Повторите PIN</label>
+                    <input
+                        id="guest-pin2"
+                        name="pin2"
+                        type="password"
+                        inputmode="numeric"
+                        pattern="\d*"
+                        class="guest-input"
+                        placeholder="Повторите PIN"
                         required
                     >
                 </div>
@@ -489,6 +593,22 @@
         </form>
     </div>
 </div>
+<!-- Модалка “Заявка отправлена” (вместо alert) -->
+<div class="guest-form-modal-backdrop" id="guestSuccessModal" aria-hidden="true">
+  <div class="guest-form-modal">
+    <button type="button" class="guest-form-modal-close" id="guestSuccessModalClose">&times;</button>
+
+    <h2>Заявка отправлена</h2>
+    <p>
+      Администратор получит уведомление и проверит, что вы действительно припарковались во дворе.<br><br>
+      Как только админ одобрит заявку — ваша машина появится на парковке, и вы сможете войти по телефону и PIN.
+    </p>
+
+    <div class="guest-form-footer">
+      <button type="button" class="btn-primary" id="guestSuccessOkBtn">Закрыть</button>
+    </div>
+  </div>
+</div>
 
 <script>
     document.addEventListener("DOMContentLoaded", () => {
@@ -561,6 +681,30 @@
                 }
             });
         }
+		
+const successModal = document.getElementById("guestSuccessModal");
+const successModalClose = document.getElementById("guestSuccessModalClose");
+const successOkBtn = document.getElementById("guestSuccessOkBtn");
+
+function openSuccessModal(){
+  if (!successModal) return;
+  successModal.classList.add("is-open");
+  document.body.style.overflow = "hidden";
+}
+
+function closeSuccessModal(){
+  if (!successModal) return;
+  successModal.classList.remove("is-open");
+  document.body.style.overflow = "";
+}
+
+if (successModal) {
+  successModal.addEventListener("click", (evt) => {
+    if (evt.target === successModal) closeSuccessModal();
+  });
+}
+if (successModalClose) successModalClose.addEventListener("click", closeSuccessModal);
+if (successOkBtn) successOkBtn.addEventListener("click", closeSuccessModal);
 
         // --- Отправка формы через fetch, без перехода на JSON-страницу ---
         const guestForm = document.getElementById("guestSiteForm");
@@ -579,10 +723,7 @@
                     const data = await resp.json();
 
                     if (data && data.ok) {
-                        alert(
-                            "Заявка отправлена. Администратор получит уведомление " +
-                            "и проверит, что вы действительно припарковались во дворе."
-                        );
+                        openSuccessModal();
                         guestForm.reset();
                         closeForm();
                     } else {
@@ -594,7 +735,64 @@
                 }
             });
         }
+		        // --- Вход гостя по телефону + PIN ---
+        const guestLoginForm = document.getElementById("guestLoginForm");
+        const guestLoginMsg = document.getElementById("guestLoginMsg");
+
+        if (guestLoginForm) {
+            guestLoginForm.addEventListener("submit", async (e) => {
+                e.preventDefault();
+
+                const phone = (guestLoginForm.querySelector('[name="phone"]')?.value || "").trim();
+                const pin = (guestLoginForm.querySelector('[name="pin"]')?.value || "").trim();
+
+                if (guestLoginMsg) guestLoginMsg.textContent = "";
+
+                try {
+                    const resp = await fetch("/api/guest/login", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ phone, pin }),
+                    });
+
+                    const data = await resp.json().catch(() => null);
+
+                    if (resp.ok && data && data.ok) {
+                        if (guestLoginMsg) {
+                            guestLoginMsg.textContent = `Готово! Вы вошли как ${data.name || "гость"}.`;
+                        }
+                        // На будущее: можно сохранить guest_id для автозаполнения
+                        try {
+                            localStorage.setItem("guest_id", String(data.guest_id || ""));
+                            localStorage.setItem("guest_phone", String(data.phone || phone));
+                            localStorage.setItem("guest_name", String(data.name || ""));
+                        } catch (err) {}
+						    // сразу переходим в парковку (или просто обновляем страницу)
+    if (data.redirect) {
+        window.location.href = data.redirect;
+    } else {
+        window.location.reload();
+    }
+    return;
+
+						    // Обновляем UI сразу: у гостя появится шапка/меню из base.html
+    // и при этом логично перекинуть на саму парковку.
+    window.location.href = (data && data.redirect) ? data.redirect : "/parking";
+    return;
+
+                    } else {
+                        const msg = (data && data.message) ? data.message : "Не удалось войти. Проверьте телефон и PIN.";
+                        if (guestLoginMsg) guestLoginMsg.textContent = msg;
+                    }
+                } catch (err) {
+                    console.error(err);
+                    if (guestLoginMsg) guestLoginMsg.textContent = "Ошибка сети. Попробуйте ещё раз.";
+                }
+            });
+        }
+
     });
+
 </script>
 
 

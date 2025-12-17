@@ -5,6 +5,7 @@
     <title>{% block title %}Мой дом на Кошкина{% endblock %}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+	{% block head_extra %}{% endblock %}
     <style>
         .user-menu {
             position: relative;
@@ -60,7 +61,6 @@
     </style>
 </head>
 
-</head>
 <body>
 <header class="site-header">
     <div class="container header-inner">
@@ -70,33 +70,47 @@
                 <span class="logo-text">Мой дом на Кошкина</span>
             </a>
         </div>
-        <nav class="main-nav">
+<nav class="main-nav">
+    {% set u = session.get('user') or {} %}
+    {% set is_guest = u.get('is_guest') %}
+
+    {% if session.get('user') %}
+        {% if is_guest %}
+            {% if nav_can_use_parking %}
+                <a href="{{ url_for('parking') }}">Парковка</a>
+            {% endif %}
+        {% else %}
             <a href="{{ url_for('index') }}">Главная</a>
-            {% if session.get('user') %}
-                <a href="{{ url_for('news') }}">Новости</a>
+            <a href="{{ url_for('news') }}">Новости</a>
 
-                {% if session['user'].get('is_admin') %}
-                    <a href="{{ url_for('admin_news_new') }}">Добавить новость</a>
-                {% endif %}
-
-                <div class="user-menu">
-                    <button type="button" class="user-menu-toggle" id="userMenuToggle">
-                        {{ session['user'].get('name') or 'Житель' }}
-                    </button>
-                    <div class="user-menu-dropdown" id="userMenuDropdown">
-                        <a href="{{ url_for('profile') }}">Профиль</a>
-                        <a href="{{ url_for('logout') }}">Выйти</a>
-                    </div>
-                </div>
-            {% else %}
-                <a href="{{ url_for('login') }}" class="btn-link">Вход для жильцов</a>
+            {% if nav_can_use_parking %}
+                <a href="{{ url_for('parking') }}">Парковка</a>
             {% endif %}
 
-            <!-- Переключатель темы -->
-            <button id="themeToggle" class="theme-toggle" type="button" aria-label="Переключить тему">
-                <span id="themeToggleIcon">🌙</span>
+            {% if u.get('is_admin') %}
+                <a href="{{ url_for('admin_news_new') }}">Добавить новость</a>
+            {% endif %}
+        {% endif %}
+
+        <div class="user-menu">
+            <button type="button" class="user-menu-toggle" id="userMenuToggle">
+                {{ u.get('name') or ('Гость' if is_guest else 'Житель') }}
             </button>
-        </nav>
+            <div class="user-menu-dropdown" id="userMenuDropdown">
+                <a href="{{ url_for('profile') }}">Профиль</a>
+                <a href="{{ url_for('logout') }}">Выйти</a>
+            </div>
+        </div>
+    {% else %}
+        <a href="{{ url_for('login') }}" class="btn-link">Вход для жильцов</a>
+    {% endif %}
+
+    <!-- Переключатель темы -->
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Переключить тему">
+        <span id="themeToggleIcon">🌙</span>
+    </button>
+</nav>
+
     </div>
 </header>
 
@@ -122,7 +136,10 @@
         <span class="footer-note">
             Сайт для жильцов дома. Информация не является публичной офертой.
         </span>
-        <a href="{{ url_for('news_archive') }}" class="footer-link">Архив новостей</a>
+        {% if not (session.get('user') or {}).get('is_guest') %}
+    <a href="{{ url_for('news_archive') }}" class="footer-link">Архив новостей</a>
+{% endif %}
+
     </div>
 </footer>
 

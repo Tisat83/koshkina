@@ -4,7 +4,7 @@
 
 {% block content %}
 <section class="info-section auth-section">
-    <h1>Профиль жильца</h1>
+    <h1>{% if is_guest %}Профиль гостя{% else %}Профиль жильца{% endif %}</h1>
     <p class="auth-description">
         Здесь можно обновить ФИО, телефоны, номер машины и при необходимости сменить PIN
         для входа на сайт.
@@ -12,9 +12,18 @@
 
     <form method="post" class="auth-form">
         <div class="form-group">
-            <label>Квартира</label>
-            <input type="text" value="{{ apartment }}" disabled>
-        </div>
+    <label>{% if is_guest %}Логин (телефон){% else %}Квартира{% endif %}</label>
+    <input
+        type="text"
+        value="{% if is_guest %}{{ login_value or '' }}{% else %}{{ apartment }}{% endif %}"
+        disabled
+    >
+    {% if is_guest %}
+        <p class="auth-hint" style="margin-top:6px;">
+            Это гостевой аккаунт. Технический идентификатор: {{ apartment }}{% if guest_id %} (id={{ guest_id }}){% endif %}.
+        </p>
+    {% endif %}
+</div>
 
         <div class="form-group">
             <label for="last_name">Фамилия</label>
@@ -94,6 +103,7 @@
         {% endif %}
 
         <hr style="margin: 12px 0; border: none; border-top: 1px solid var(--border-color);">
+        {% if not is_guest %}
 
         <h2 style="font-size: 16px; margin: 0 0 8px;">Сменить PIN</h2>
         <p class="auth-hint">
@@ -137,7 +147,7 @@
                 placeholder="ещё раз тот же PIN"
             >
         </div>
-
+{% endif %}
         <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
             <a href="{{ url_for('news') }}" class="btn-secondary" style="text-decoration:none; text-align:center;">
                 Отмена

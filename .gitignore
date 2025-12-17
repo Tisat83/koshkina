@@ -1,14 +1,18 @@
-# Python
+# venv
+venv/
+.env
+.env.*
 __pycache__/
 *.pyc
 
-# Виртуальное окружение
-.venv/
-venv/
+# IDE
+.idea/
+.vscode/
 
-# Настройки
-.env
-instance/
+# логи и временные файлы
+*.log
 
-# Данные с телефонами жильцов (НЕ КОММИТИТЬ!)
-data/users.json
+# данные и загрузки (на сервере будут свои)
+data/*.json
+static/img/guest_photos/
+static/uploads/
