@@ -14,5 +14,7 @@ __pycache__/
 
 # данные и загрузки (на сервере будут свои)
 data/*.json
+data/users.json
 static/img/guest_photos/
 static/uploads/
+data/*.lock
