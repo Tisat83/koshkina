@@ -1556,6 +1556,11 @@ def api_parking_occupy(spot_id: int):
                 )
 
     existing = spots.get(sid)
+    prev = existing if isinstance(existing, dict) else {}
+    prev_guest_photo = (prev.get("guest_photo") or "").strip()
+    prev_guest_id = prev.get("guest_id")
+    prev_is_guest = bool(prev.get("is_guest"))
+
     # Чужое занятое место трогать нельзя, кроме админа
     if existing and existing.get("apartment") != apartment and not is_admin:
         return jsonify({"ok": False, "error": "spot_busy"}), 409
@@ -1588,6 +1593,10 @@ def api_parking_occupy(spot_id: int):
     except Exception:
         telegram_chat_id = ""
 
+    # сохраняем гостевые поля, чтобы фото не пропадало при обновлении данных
+    guest_id_to_save = user.get("guest_id") if user.get("is_guest") else prev_guest_id
+    is_guest_to_save = bool(user.get("is_guest")) or prev_is_guest
+
     spots[sid] = {
         "apartment": occupant_apartment,
         "name": user.get("name") or "",
@@ -1598,7 +1607,13 @@ def api_parking_occupy(spot_id: int):
         "long_term": long_term,
         "updated_at": datetime.utcnow().isoformat(timespec="minutes"),
         "telegram_chat_id": telegram_chat_id,
+
+        # ВАЖНО: не теряем фото гостя при обновлении
+        "guest_id": guest_id_to_save,
+        "is_guest": is_guest_to_save,
+        "guest_photo": prev_guest_photo,
     }
+
     state["spots"] = spots
     state["subscriptions"] = subscriptions
     save_parking_state(state)
