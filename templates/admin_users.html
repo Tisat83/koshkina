@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block title %}Пользователи | Мой дом на Кошкина{% endblock %}
+
+{% block content %}
+<section class="info-section">
+  <h1>Пользователи</h1>
+
+  <h2 style="margin-top:16px;">Жильцы</h2>
+  <div style="overflow:auto;">
+    <table class="guests-table">
+      <thead>
+        <tr>
+          <th>Кв</th>
+          <th>resident_id</th>
+          <th>Логин-имя</th>
+          <th>ФИО</th>
+          <th>Телефон</th>
+          <th>Телефон 2</th>
+          <th>Авто</th>
+          <th>Парковка</th>
+          <th>Подписки</th>
+          <th>Telegram chat_id</th>
+          <th>Лимит мест</th>
+          <th>Действия</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in residents %}
+        {% set form_id = "resform_" ~ r.apartment ~ "_" ~ r.resident_id %}
+        <tr>
+          <td>{{ r.apartment }}</td>
+          <td>{{ r.resident_id }}</td>
+
+          <td><input form="{{form_id}}" type="text" name="name" value="{{ r.name }}" style="width:140px;"></td>
+
+          <td style="min-width:260px;">
+            <input form="{{form_id}}" type="text" name="last_name" value="{{ r.last_name }}" placeholder="Фамилия" style="width:120px;">
+            <input form="{{form_id}}" type="text" name="first_name" value="{{ r.first_name }}" placeholder="Имя" style="width:120px;">
+            <input form="{{form_id}}" type="text" name="middle_name" value="{{ r.middle_name }}" placeholder="Отчество" style="width:120px;">
+          </td>
+
+          <td><input form="{{form_id}}" type="text" name="phone1" value="{{ r.phone1 }}" style="width:140px;"></td>
+          <td><input form="{{form_id}}" type="text" name="phone2" value="{{ r.phone2 }}" style="width:140px;"></td>
+
+          <td><input form="{{form_id}}" type="text" name="car_number" value="{{ r.car_number }}" style="width:120px;"></td>
+
+          <td style="text-align:center;">
+            <input form="{{form_id}}" type="checkbox" name="can_use_parking" {% if r.can_use_parking %}checked{% endif %}>
+          </td>
+
+          <td style="text-align:center;">
+            <input form="{{form_id}}" type="checkbox" name="can_subscribe_parking" {% if r.can_subscribe_parking %}checked{% endif %}>
+          </td>
+
+          <td><input form="{{form_id}}" type="text" name="telegram_chat_id" value="{{ r.telegram_chat_id }}" style="width:140px;"></td>
+
+          <td style="text-align:center;">
+            <input form="{{form_id}}" type="number" min="1" step="1" name="max_active_spots" value="{{ r.max_active_spots }}" style="width:70px;">
+          </td>
+
+          <td style="white-space:nowrap;">
+            <form id="{{form_id}}" method="post" style="display:inline;">
+              <input type="hidden" name="entity" value="resident">
+              <input type="hidden" name="action" value="save">
+              <input type="hidden" name="apartment" value="{{ r.apartment }}">
+              <input type="hidden" name="resident_id" value="{{ r.resident_id }}">
+              <button type="submit">Сохранить</button>
+            </form>
+
+            <form method="post" style="display:inline;" onsubmit="return confirm('Удалить жильца?');">
+              <input type="hidden" name="entity" value="resident">
+              <input type="hidden" name="action" value="delete">
+              <input type="hidden" name="apartment" value="{{ r.apartment }}">
+              <input type="hidden" name="resident_id" value="{{ r.resident_id }}">
+              <button type="submit">Удалить</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h2 style="margin-top:22px;">Гости</h2>
+  <div style="overflow:auto;">
+    <table class="guests-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Статус</th>
+          <th>Имя</th>
+          <th>Телефон</th>
+          <th>Авто</th>
+          <th>Парковка</th>
+          <th>Подписки</th>
+          <th>Telegram chat_id</th>
+          <th>Лимит мест</th>
+          <th>Действия</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for g in guests %}
+        {% set gform = "gform_" ~ g.id %}
+        <tr>
+          <td>{{ g.id }}</td>
+          <td>{{ g.status }}</td>
+
+          <td><input form="{{gform}}" type="text" name="name" value="{{ g.name or '' }}" style="width:160px;"></td>
+          <td><input form="{{gform}}" type="text" name="phone" value="{{ g.phone or '' }}" style="width:140px;"></td>
+          <td><input form="{{gform}}" type="text" name="car_number" value="{{ g.car_number or '' }}" style="width:120px;"></td>
+
+          <td style="text-align:center;">
+            <input form="{{gform}}" type="checkbox" name="can_use_parking" {% if g.can_use_parking %}checked{% endif %}>
+          </td>
+
+          <td style="text-align:center;">
+            <input form="{{gform}}" type="checkbox" name="can_subscribe_parking" {% if g.can_subscribe_parking %}checked{% endif %}>
+          </td>
+
+          <td><input form="{{gform}}" type="text" name="telegram_chat_id" value="{{ g.telegram_chat_id or '' }}" style="width:140px;"></td>
+
+          <td style="text-align:center;">
+            <input form="{{gform}}" type="number" min="1" step="1" name="max_active_spots" value="{{ g.max_active_spots or 1 }}" style="width:70px;">
+          </td>
+
+          <td style="white-space:nowrap;">
+            <form id="{{gform}}" method="post" style="display:inline;">
+              <input type="hidden" name="entity" value="guest">
+              <input type="hidden" name="action" value="save">
+              <input type="hidden" name="guest_id" value="{{ g.id }}">
+              <button type="submit">Сохранить</button>
+            </form>
+
+            <form method="post" style="display:inline;" onsubmit="return confirm('Удалить гостя?');">
+              <input type="hidden" name="entity" value="guest">
+              <input type="hidden" name="action" value="delete">
+              <input type="hidden" name="guest_id" value="{{ g.id }}">
+              <button type="submit">Удалить</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -80,7 +80,7 @@
                 <a href="{{ url_for('parking') }}">Парковка</a>
             {% endif %}
         {% else %}
-            <a href="{{ url_for('index') }}">Главная</a>
+            <a href="{{ url_for('index') }}">🏠</a>
             <a href="{{ url_for('news') }}">Новости</a>
 
             {% if nav_can_use_parking %}
@@ -88,8 +88,19 @@
             {% endif %}
 
             {% if u.get('is_admin') %}
-                <a href="{{ url_for('admin_news_new') }}">Добавить новость</a>
+                <a href="{{ url_for('admin_news_new') }}">+</a>
             {% endif %}
+			{% if u.get('is_admin') %}
+  <div class="user-menu" style="margin-right:8px;">
+    <button type="button" class="user-menu-toggle" id="adminMenuToggle">Админ</button>
+    <div class="user-menu-dropdown" id="adminMenuDropdown">
+      <a href="{{ url_for('admin_invites') }}">Приглашения</a>
+      <a href="{{ url_for('admin_guests') }}">Гости</a>
+      <a href="{{ url_for('admin_users') }}">Пользователи</a>
+    </div>
+  </div>
+{% endif %}
+
         {% endif %}
 
         <div class="user-menu">
@@ -153,37 +164,43 @@
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
-    const toggle = document.getElementById("userMenuToggle");
-    const dropdown = document.getElementById("userMenuDropdown");
-    if (!toggle || !dropdown) {
-        return;
+    const menus = [
+        { toggle: document.getElementById("userMenuToggle"), dropdown: document.getElementById("userMenuDropdown") },
+        { toggle: document.getElementById("adminMenuToggle"), dropdown: document.getElementById("adminMenuDropdown") },
+    ].filter(m => m.toggle && m.dropdown);
+
+    if (!menus.length) return;
+
+    function closeAll() {
+        menus.forEach(m => m.dropdown.classList.remove("is-open"));
     }
 
-    function closeMenu() {
-        dropdown.classList.remove("is-open");
-    }
-
-    toggle.addEventListener("click", function (event) {
-        event.stopPropagation();
-        dropdown.classList.toggle("is-open");
+    menus.forEach(m => {
+        m.toggle.addEventListener("click", function (event) {
+            event.stopPropagation();
+            const isOpen = m.dropdown.classList.contains("is-open");
+            closeAll();
+            if (!isOpen) m.dropdown.classList.add("is-open");
+        });
     });
 
     document.addEventListener("click", function (event) {
-        if (!dropdown.classList.contains("is-open")) {
-            return;
-        }
-        if (!dropdown.contains(event.target) && event.target !== toggle) {
-            closeMenu();
+        for (const m of menus) {
+            if (m.dropdown.classList.contains("is-open")) {
+                if (!m.dropdown.contains(event.target) && event.target !== m.toggle) {
+                    closeAll();
+                    break;
+                }
+            }
         }
     });
 
     window.addEventListener("keydown", function (event) {
-        if (event.key === "Escape") {
-            closeMenu();
-        }
+        if (event.key === "Escape") closeAll();
     });
 });
 </script>
+
 <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
 <script src="{{ url_for('static', filename='js/lightbox.js') }}"></script>
 </body>

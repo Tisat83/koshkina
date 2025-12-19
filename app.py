@@ -57,7 +57,7 @@ REACTION_EMOJIS = ["👍", "❤️", "🔥", "🎉", "👏", "😁", "😢", "�
 
 # Квартиры администраторов (можно переопределить через переменную окружения)
 # Пример: set ADMIN_APARTMENTS=501,12
-ADMIN_APARTMENTS = os.getenv("ADMIN_APARTMENTS", "501")
+ADMIN_APARTMENTS = os.getenv("ADMIN_APARTMENTS", "447")
 ADMINS = {a.strip() for a in ADMIN_APARTMENTS.split(",") if a.strip()}
 
 # Аварийный вход по телефону (только для восстановления админа).
@@ -186,11 +186,262 @@ def save_json(path: Path, data):
 
 
 def load_users() -> dict:
-    return load_json(DATA_DIR / "users.json", {})
+    users = load_json(DATA_DIR / "users.json", {})
+    users, changed = ensure_users_schema(users)
+    if changed:
+        save_json(DATA_DIR / "users.json", users)
+    return users
 
 
 def save_users(users: dict):
     save_json(DATA_DIR / "users.json", users)
+# ---------------- Users/Guests schema helpers ----------------
+
+DEFAULT_RESIDENT_FIELDS = {
+    "last_name": "",
+    "first_name": "",
+    "middle_name": "",
+    "phone": "",
+    "phones": [],
+    "car_number": "",
+    "car_code": "",
+    "can_use_parking": False,
+    "can_subscribe_parking": False,
+    "telegram_chat_id": "",
+    "max_active_spots": 1,
+}
+
+DEFAULT_GUEST_EXTRA_FIELDS = {
+    "can_use_parking": False,
+    "can_subscribe_parking": False,
+    "telegram_chat_id": "",
+    "max_active_spots": 1,
+}
+
+
+def _next_resident_id(apartment: str, used: set[str]) -> str:
+    base = str(apartment).strip() or "apt"
+    i = 1
+    while True:
+        rid = f"{base}_{i}"
+        if rid not in used:
+            used.add(rid)
+            return rid
+        i += 1
+
+
+def ensure_users_schema(users) -> tuple[dict, bool]:
+    """
+    Миграция users.json:
+    - у каждого resident появляется resident_id
+    - профильные поля переезжают внутрь resident (а не на уровень квартиры)
+    - проставляются дефолты: can_use_parking/can_subscribe_parking/telegram_chat_id/max_active_spots
+    """
+    changed = False
+    if not isinstance(users, dict):
+        return {}, True
+
+    ROOT_PROFILE_KEYS = {
+        "last_name",
+        "first_name",
+        "middle_name",
+        "phone",
+        "car_number",
+        "car_code",
+        "telegram_chat_id",
+        "can_use_parking",
+        "can_subscribe_parking",
+        "max_active_spots",
+    }
+
+    for apt, rec in list(users.items()):
+        apt = str(apt).strip()
+        if not apt:
+            continue
+
+        if not isinstance(rec, dict):
+            rec = {}
+            users[apt] = rec
+            changed = True
+
+        residents = rec.get("residents")
+        if not isinstance(residents, list):
+            residents = []
+            rec["residents"] = residents
+            changed = True
+
+        # legacy: один PIN на квартиру -> превращаем в одного resident
+        legacy_pin = str(rec.get("pin_hash") or "").strip()
+        if legacy_pin and not residents:
+            residents.append({"name": f"Житель кв. {apt}", "pin_hash": legacy_pin})
+            changed = True
+
+        # resident_id + дефолты на каждом resident
+        used_ids = set()
+        for r in residents:
+            if isinstance(r, dict) and r.get("resident_id"):
+                used_ids.add(str(r["resident_id"]))
+
+        for i, r in enumerate(residents):
+            if not isinstance(r, dict):
+                residents[i] = {}
+                r = residents[i]
+                changed = True
+
+            if not str(r.get("resident_id") or "").strip():
+                r["resident_id"] = _next_resident_id(apt, used_ids)
+                changed = True
+
+            if "name" not in r:
+                r["name"] = ""
+                changed = True
+
+            for k, v in DEFAULT_RESIDENT_FIELDS.items():
+                if k not in r:
+                    r[k] = [] if isinstance(v, list) else v
+                    changed = True
+
+            # нормализуем max_active_spots
+            try:
+                r["max_active_spots"] = int(r.get("max_active_spots") or 1)
+            except Exception:
+                r["max_active_spots"] = 1
+                changed = True
+            if r["max_active_spots"] < 1:
+                r["max_active_spots"] = 1
+                changed = True
+
+        # переносим профильные поля с уровня квартиры в ПЕРВОГО жильца (best-effort)
+        # (автоматически “правильно” разложить по 2 жильцам нельзя — админ потом поправит)
+        if residents:
+            target = residents[0] if isinstance(residents[0], dict) else None
+            if isinstance(target, dict):
+                for k in list(ROOT_PROFILE_KEYS):
+                    if k in rec and rec.get(k) not in (None, "", [], {}):
+                        # переносим только если у target пусто/дефолт
+                        if k in ("can_use_parking", "can_subscribe_parking"):
+                            if target.get(k) is False:
+                                target[k] = bool(rec.get(k))
+                                changed = True
+                        elif k == "max_active_spots":
+                            try:
+                                val = int(rec.get(k) or 1)
+                            except Exception:
+                                val = 1
+                            if int(target.get("max_active_spots") or 1) == 1 and val != 1:
+                                target["max_active_spots"] = max(1, val)
+                                changed = True
+                        else:
+                            if not str(target.get(k) or "").strip():
+                                target[k] = str(rec.get(k)).strip()
+                                changed = True
+
+        # пересобираем root phones как union (для совместимости со старым кодом/поиском)
+        union = []
+        def add_phone(p):
+            p = str(p or "").strip()
+            if p and p not in union:
+                union.append(p)
+
+        if isinstance(rec.get("phones"), list):
+            for p in rec["phones"]:
+                add_phone(p)
+
+        for r in residents:
+            if not isinstance(r, dict):
+                continue
+            add_phone(r.get("phone"))
+            if isinstance(r.get("phones"), list):
+                for p in r["phones"]:
+                    add_phone(p)
+
+        if union != rec.get("phones"):
+            rec["phones"] = union
+            changed = True
+
+        # удаляем профиль на уровне квартиры, чтобы он больше не “тёк” между жильцами
+        for k in list(ROOT_PROFILE_KEYS):
+            if k in rec:
+                rec.pop(k, None)
+                changed = True
+
+        # legacy cleanup
+        if "pin_hash" in rec:
+            rec.pop("pin_hash", None)
+            changed = True
+        if "name" in rec:
+            rec.pop("name", None)
+            changed = True
+
+        # нормализуем ключ словаря
+        if apt != str(apt):
+            users.pop(apt, None)
+            users[str(apt)] = rec
+            changed = True
+
+    return users, changed
+
+
+def ensure_guests_schema(data) -> tuple[dict, bool]:
+    changed = False
+    if not isinstance(data, dict):
+        return {"guests": []}, True
+
+    guests = data.get("guests")
+    if not isinstance(guests, list):
+        data["guests"] = []
+        guests = data["guests"]
+        changed = True
+
+    for i, g in enumerate(guests):
+        if not isinstance(g, dict):
+            guests[i] = {}
+            g = guests[i]
+            changed = True
+
+        for k, v in DEFAULT_GUEST_EXTRA_FIELDS.items():
+            if k not in g:
+                g[k] = v
+                changed = True
+
+        try:
+            g["max_active_spots"] = int(g.get("max_active_spots") or 1)
+        except Exception:
+            g["max_active_spots"] = 1
+            changed = True
+        if g["max_active_spots"] < 1:
+            g["max_active_spots"] = 1
+            changed = True
+
+        if g.get("telegram_chat_id") is None:
+            g["telegram_chat_id"] = ""
+            changed = True
+
+    data["guests"] = guests
+    return data, changed
+
+
+def get_current_resident(apt_record: dict, sess_user: dict) -> dict:
+    """Возвращает текущего resident по resident_id (или по name), иначе первого."""
+    if not isinstance(apt_record, dict):
+        return {}
+    residents = apt_record.get("residents")
+    if not isinstance(residents, list) or not residents:
+        return {}
+
+    rid = str(sess_user.get("resident_id") or "").strip()
+    if rid:
+        for r in residents:
+            if isinstance(r, dict) and str(r.get("resident_id") or "").strip() == rid:
+                return r
+
+    name = str(sess_user.get("name") or "").strip()
+    if name:
+        for r in residents:
+            if isinstance(r, dict) and str(r.get("name") or "").strip() == name:
+                return r
+
+    return residents[0] if isinstance(residents[0], dict) else {}
 
 
 def load_posts() -> list:
@@ -309,26 +560,11 @@ def save_reactions(reactions: dict):
 
 
 def load_guests() -> dict:
-    """
-    Заявки гостей на парковку.
-    Формат:
-    {
-      "guests": [
-        {
-          "id": 1,
-          "created_at": "...",
-          "name": "...",
-          "phone": "...",
-          "car_number": "...",
-          "comment": "...",
-          "status": "pending/approved/rejected",
-          "source": "site/telegram"
-        },
-        ...
-      ]
-    }
-    """
-    return load_json(GUESTS_FILE, {"guests": []})
+    data = load_json(GUESTS_FILE, {"guests": []})
+    data, changed = ensure_guests_schema(data)
+    if changed:
+        save_guests(data)
+    return data
 
 
 def save_guests(data: dict):
@@ -548,9 +784,19 @@ def admin_required(view_func):
 
 
 def get_user_key() -> str:
+    """Стабильный ключ пользователя для реакций/подписок/парковки."""
     user = session.get("user") or {}
-    apt = (user.get("apartment") or "").strip()
-    name = (user.get("name") or "").strip()
+    apt = str(user.get("apartment") or "").strip()
+
+    if user.get("is_guest"):
+        gid = str(user.get("guest_id") or "").strip()
+        return f"guest:{gid}" if gid else (f"guest:{apt}" if apt else "guest")
+
+    rid = str(user.get("resident_id") or "").strip()
+    if apt and rid:
+        return f"{apt}:{rid}"
+
+    name = str(user.get("name") or "").strip()
     return f"{apt}:{name}" if name else apt
 
 
@@ -566,30 +812,26 @@ def user_has_any_pin(user_record: dict | None) -> bool:
 
 
 def current_user_parking_flags():
-    """
-    Общий хелпер: текущий пользователь + флаги доступа к парковке.
-    can_use_parking: можно ли пользоваться парковкой
-    can_subscribe_parking: можно ли подписываться на уведомления
-    """
     sess_user = session.get("user") or {}
     apartment = str(sess_user.get("apartment") or "").strip()
     users = load_users()
-    record = users.get(apartment) if apartment and isinstance(users, dict) else {}
-    if not isinstance(record, dict):
-        record = {}
+    apt_record = users.get(apartment) if apartment and isinstance(users, dict) else {}
+    if not isinstance(apt_record, dict):
+        apt_record = {}
     is_admin = bool(sess_user.get("is_admin"))
     is_guest = bool(sess_user.get("is_guest"))
 
-    # Гостю (пока) даём доступ к парковке через сессию, без users.json
     if is_guest:
-        can_use_parking = True
-        can_subscribe_parking = False
-        return sess_user, apartment, record, can_use_parking, can_subscribe_parking
+        return sess_user, apartment, {}, True, False
 
-    # Жильцы: доступ только если can_use_parking=true (или админ)
-    can_use_parking = bool(record.get("can_use_parking", False) or is_admin)
-    can_subscribe_parking = bool(record.get("can_subscribe_parking", False) or is_admin)
-    return sess_user, apartment, record, can_use_parking, can_subscribe_parking
+    resident = get_current_resident(apt_record, sess_user)
+    if not isinstance(resident, dict):
+        resident = {}
+
+    can_use_parking = bool(resident.get("can_use_parking", False) or is_admin)
+    can_subscribe_parking = bool(resident.get("can_subscribe_parking", False) or is_admin)
+    return sess_user, apartment, resident, can_use_parking, can_subscribe_parking
+
 
 @app.context_processor
 def inject_nav_flags():
@@ -1127,9 +1369,11 @@ def login():
                     if stored and check_pin(secret, stored):
                         session["user"] = {
                             "apartment": apartment,
+                            "resident_id": (r.get("resident_id") or "").strip(),
                             "name": r.get("name", ""),
                             "is_admin": admin,
                         }
+
                         flash("Вы успешно вошли!", "success")
                         return redirect(url_for("news"))
 
@@ -1196,11 +1440,12 @@ def logout():
 @app.route("/profile", methods=["GET", "POST"])
 @login_required
 def profile():
-    """Профиль жильца: ФИО, телефоны, машина, смена PIN."""
     users = load_users()
     sess_user = session.get("user") or {}
-    apartment = (sess_user.get("apartment") or "").strip()
-    # --- Гость: показываем профиль из session (не из users.json) ---
+    apartment = str(sess_user.get("apartment") or "").strip()
+    is_admin = bool(sess_user.get("is_admin"))
+
+    # --- Гость: профиль пока только для просмотра ---
     if bool(sess_user.get("is_guest")):
         guest_phone = (sess_user.get("phone") or "").strip()
         guest_car = (sess_user.get("car_code") or "").strip()
@@ -1215,7 +1460,7 @@ def profile():
             is_guest=True,
             guest_id=sess_user.get("guest_id"),
             login_value=guest_phone or "",
-            apartment=apartment,          # технический ключ (g17)
+            apartment=apartment,
             last_name="",
             first_name=guest_name,
             middle_name="",
@@ -1226,149 +1471,74 @@ def profile():
             can_subscribe_parking=False,
         )
 
-    if not apartment:
-        flash("Не удалось определить квартиру.", "error")
-        return redirect(url_for("news"))
+    # --- Жилец: берём resident внутри квартиры ---
+    apt_record = users.get(apartment, {}) if isinstance(users, dict) else {}
+    if not isinstance(apt_record, dict):
+        apt_record = {}
 
-    record = users.get(apartment, {}) if isinstance(users, dict) else {}
+    resident = get_current_resident(apt_record, sess_user)
+    if not isinstance(resident, dict):
+        resident = {}
 
-    # --- читаем существующие данные профиля ---
-    last_name = (record.get("last_name") or "").strip()
-    first_name = (record.get("first_name") or "").strip() or (
+    last_name = (resident.get("last_name") or "").strip()
+    first_name = (resident.get("first_name") or "").strip() or (resident.get("name") or "").strip() or (
         sess_user.get("name") or ""
-    ).strip()
-    middle_name = (record.get("middle_name") or "").strip()
+    )
+    middle_name = (resident.get("middle_name") or "").strip()
 
-    # телефоны
-    phones = []
-    if isinstance(record.get("phones"), list):
-        for p in record["phones"]:
-            if p:
-                phones.append(str(p).strip())
-    elif isinstance(record.get("phone"), str) and record["phone"].strip():
-        phones.append(record["phone"].strip())
+    phone1 = (resident.get("phone") or "").strip()
+    phone2 = ""
+    if isinstance(resident.get("phones"), list) and resident["phones"]:
+        phone2 = str(resident["phones"][0] or "").strip()
 
-    phone1 = phones[0] if len(phones) > 0 else ""
-    phone2 = phones[1] if len(phones) > 1 else ""
+    car_number = (resident.get("car_number") or resident.get("car_code") or "").strip()
 
-    # номер машины (для совместимости с парковкой берём и car_number, и car_code)
-    car_number = (record.get("car_number") or record.get("car_code") or "").strip()
-
-    # флаги доступа к парковке (пока только для чтения, править будем позже)
-    can_use_parking = bool(record.get("can_use_parking", True))
-    can_subscribe_parking = bool(record.get("can_subscribe_parking", False))
+    can_use_parking = bool(resident.get("can_use_parking", False) or is_admin)
+    can_subscribe_parking = bool(resident.get("can_subscribe_parking", False) or is_admin)
 
     if request.method == "POST":
-        # --- читаем форму ---
         last_name = (request.form.get("last_name") or "").strip()
         first_name = (request.form.get("first_name") or "").strip()
         middle_name = (request.form.get("middle_name") or "").strip()
-        phone1 = (request.form.get("phone1") or "").strip()
-        phone2 = (request.form.get("phone2") or "").strip()
-        car_number = (request.form.get("car_number") or "").strip()
+        phone1 = normalize_phone((request.form.get("phone1") or "").strip())
+        phone2_raw = normalize_phone((request.form.get("phone2") or "").strip())
+        car_number = (request.form.get("car_number") or "").strip().upper()
 
-        current_pin = (request.form.get("current_pin") or "").strip()
-        new_pin1 = (request.form.get("pin1") or "").strip()
-        new_pin2 = (request.form.get("pin2") or "").strip()
+        resident["last_name"] = last_name
+        resident["first_name"] = first_name
+        resident["middle_name"] = middle_name
+        resident["phone"] = phone1
+        resident["phones"] = [phone2_raw] if phone2_raw else []
+        resident["car_number"] = car_number
+        resident["car_code"] = car_number
 
-        # --- сохраняем ФИО / телефоны / машину ---
-        record["last_name"] = last_name
-        record["first_name"] = first_name
-        record["middle_name"] = middle_name
+        # смена PIN — только текущий resident
+        cur_pin = (request.form.get("current_pin") or "").strip()
+        new_pin1 = (request.form.get("new_pin1") or "").strip()
+        new_pin2 = (request.form.get("new_pin2") or "").strip()
 
-        new_phones = []
-        if phone1:
-            new_phones.append(phone1)
-        if phone2:
-            new_phones.append(phone2)
-        record["phones"] = new_phones
-        # на всякий случай дублируем первый телефон в старое поле
-        if new_phones:
-            record["phone"] = new_phones[0]
-
-        if car_number:
-            record["car_number"] = car_number
-            # дублируем для парковки, если там ожидается car_code
-            record["car_code"] = car_number
-        else:
-            record.pop("car_number", None)
-
-        # --- смена PIN (опционально) ---
-        if current_pin or new_pin1 or new_pin2:
-            # проверяем новый PIN
+        if cur_pin or new_pin1 or new_pin2:
+            if not cur_pin:
+                flash("Введите текущий PIN.", "error")
+                return redirect(url_for("profile"))
+            if not check_pin(cur_pin, resident.get("pin_hash") or ""):
+                flash("Текущий PIN неверный.", "error")
+                return redirect(url_for("profile"))
+            if not new_pin1 or not new_pin2:
+                flash("Введите новый PIN два раза.", "error")
+                return redirect(url_for("profile"))
             if new_pin1 != new_pin2:
                 flash("Новый PIN в обоих полях должен совпадать.", "error")
                 return redirect(url_for("profile"))
-
-            if not new_pin1:
-                flash("Укажите новый PIN.", "error")
-                return redirect(url_for("profile"))
-
             if not new_pin1.isdigit() or not (4 <= len(new_pin1) <= 8):
-                flash("Новый PIN должен состоять из 4–8 цифр.", "error")
+                flash("PIN должен состоять из 4–8 цифр.", "error")
                 return redirect(url_for("profile"))
+            resident["pin_hash"] = hash_pin(new_pin1)
 
-            # нужно ли проверять текущий PIN
-            has_pin = user_has_any_pin(record)
-            if has_pin:
-                if not current_pin:
-                    flash("Введите текущий PIN, чтобы его сменить.", "error")
-                    return redirect(url_for("profile"))
-
-                hashes = []
-                if record.get("pin_hash"):
-                    hashes.append(record["pin_hash"])
-                residents = record.get("residents")
-                if isinstance(residents, list):
-                    for r in residents:
-                        if isinstance(r, dict) and r.get("pin_hash"):
-                            hashes.append(r["pin_hash"])
-
-                ok_old = any(check_pin(current_pin, h) for h in hashes)
-                if not ok_old:
-                    flash("Текущий PIN указан неверно.", "error")
-                    return redirect(url_for("profile"))
-
-            # сохраняем новый PIN для текущего жильца
-            residents = record.get("residents")
-            if not isinstance(residents, list):
-                residents = []
-
-            display_name = (
-                first_name or sess_user.get("name") or f"Житель кв. {apartment}"
-            )
-
-            updated = False
-            for r in residents:
-                if not isinstance(r, dict):
-                    continue
-                if (
-                    r.get("name") == sess_user.get("name")
-                    or r.get("name") == display_name
-                ):
-                    r["name"] = display_name
-                    r["pin_hash"] = hash_pin(new_pin1)
-                    updated = True
-                    break
-
-            if not updated:
-                residents.append({"name": display_name, "pin_hash": hash_pin(new_pin1)})
-
-            record["residents"] = residents
-            # убираем старый pin_hash на квартиру, чтобы всё было через residents
-            record.pop("pin_hash", None)
-
-            # обновляем имя в сессии
-            session["user"]["name"] = display_name
-            flash("Профиль и PIN сохранены.", "success")
-        else:
-            flash("Профиль сохранён.", "success")
-
-        users[apartment] = record
         save_users(users)
+        flash("Профиль сохранён.", "success")
         return redirect(url_for("profile"))
 
-    # GET — просто отдаём текущие значения в шаблон
     return render_template(
         "profile.html",
         apartment=apartment,
@@ -1381,6 +1551,7 @@ def profile():
         can_use_parking=can_use_parking,
         can_subscribe_parking=can_subscribe_parking,
     )
+
 
 
 @app.route("/parking")
@@ -1474,7 +1645,8 @@ def api_parking_spots():
         occupant = sstate or None
         if not can_use_parking:
             occupant = None
-                    # Pending-гость не должен видеть детали занятости
+            
+        # Pending-гость не должен видеть детали занятости
         if sess_user.get("is_guest") and (sess_user.get("guest_status") or "pending") != "approved":
             occupant = None
 
@@ -1537,13 +1709,19 @@ def api_parking_occupy(spot_id: int):
     subscriptions = state.setdefault("subscriptions", {})
     sid = str(spot_id)
 
-    # если не админ — проверяем, не занято ли уже другое место этой же квартирой
+    # если не админ — проверяем, не занято ли уже другое место этим же пользователем
     if not is_admin:
+        me_key = get_user_key()
         for other_sid, info in spots.items():
             if other_sid == sid:
                 continue
-            if str(info.get("apartment") or "").strip() == apartment:
-                # у пользователя уже есть другое занятое место
+
+            owner_key = str(info.get("user_key") or "").strip()
+            same_owner = (owner_key == me_key) if owner_key else (
+                str(info.get("apartment") or "").strip() == apartment
+            )
+
+            if same_owner:
                 return (
                     jsonify(
                         {
@@ -1555,6 +1733,7 @@ def api_parking_occupy(spot_id: int):
                     409,
                 )
 
+
     existing = spots.get(sid)
     prev = existing if isinstance(existing, dict) else {}
     prev_guest_photo = (prev.get("guest_photo") or "").strip()
@@ -1562,8 +1741,15 @@ def api_parking_occupy(spot_id: int):
     prev_is_guest = bool(prev.get("is_guest"))
 
     # Чужое занятое место трогать нельзя, кроме админа
-    if existing and existing.get("apartment") != apartment and not is_admin:
-        return jsonify({"ok": False, "error": "spot_busy"}), 409
+    if existing and not is_admin:
+        ex_key = str(existing.get("user_key") or "").strip()
+        if ex_key:
+            if ex_key != get_user_key():
+                return jsonify({"ok": False, "error": "spot_busy"}), 409
+        else:
+            if str(existing.get("apartment") or "").strip() != apartment:
+                return jsonify({"ok": False, "error": "spot_busy"}), 409
+
 
     # long_term: админ может выставлять/снимать, обычный пользователь не трогает
     if is_admin:
@@ -1599,6 +1785,8 @@ def api_parking_occupy(spot_id: int):
 
     spots[sid] = {
         "apartment": occupant_apartment,
+        "apartment": occupant_apartment,
+        "user_key": (get_user_key() if occupant_apartment else ""),
         "name": user.get("name") or "",
         "car_code": car_code,
         "phone": phone if show_phone else "",
@@ -1650,8 +1838,14 @@ def api_parking_free(spot_id: int):
             save_parking_state(state)
         return jsonify({"ok": True, "spot_id": spot_id})  # уже свободно
 
-    if existing.get("apartment") != apartment and not is_admin:
-        return jsonify({"ok": False, "error": "forbidden"}), 403
+    owner_key = str(existing.get("user_key") or "").strip()
+    if owner_key:
+        if owner_key != get_user_key() and not is_admin:
+            return jsonify({"ok": False, "error": "forbidden"}), 403
+    else:
+        if str(existing.get("apartment") or "").strip() != apartment and not is_admin:
+            return jsonify({"ok": False, "error": "forbidden"}), 403
+
 
     # человекочитаемое название места
     parking_cfg = load_parking()
@@ -2162,6 +2356,158 @@ def admin_invites():
         "admin_invites.html", invites=invite_list, base_url=base_url
     )
 
+@app.route("/admin/users", methods=["GET", "POST"])
+@admin_required
+def admin_users():
+    users = load_users()
+    guests_data = load_guests()
+    guests = guests_data.get("guests") or []
+
+    if request.method == "POST":
+        entity = (request.form.get("entity") or "").strip()
+        action = (request.form.get("action") or "").strip()
+
+        if entity == "resident":
+            apartment = (request.form.get("apartment") or "").strip()
+            resident_id = (request.form.get("resident_id") or "").strip()
+
+            rec = users.get(apartment) if isinstance(users, dict) else None
+            if not isinstance(rec, dict):
+                flash("Не найден пользователь.", "error")
+                return redirect(url_for("admin_users"))
+
+            residents = rec.get("residents")
+            if not isinstance(residents, list):
+                residents = []
+                rec["residents"] = residents
+
+            idx = None
+            for i, r in enumerate(residents):
+                if isinstance(r, dict) and str(r.get("resident_id") or "").strip() == resident_id:
+                    idx = i
+                    break
+            if idx is None:
+                flash("Жилец не найден.", "error")
+                return redirect(url_for("admin_users"))
+
+            if action == "delete":
+                residents.pop(idx)
+                users, _ = ensure_users_schema(users)
+                save_users(users)
+                flash("Жилец удалён.", "success")
+                return redirect(url_for("admin_users"))
+
+            r = residents[idx]
+            r["name"] = (request.form.get("name") or "").strip()
+            r["last_name"] = (request.form.get("last_name") or "").strip()
+            r["first_name"] = (request.form.get("first_name") or "").strip()
+            r["middle_name"] = (request.form.get("middle_name") or "").strip()
+
+            r["phone"] = normalize_phone((request.form.get("phone1") or "").strip())
+            p2 = normalize_phone((request.form.get("phone2") or "").strip())
+            r["phones"] = [p2] if p2 else []
+
+            car = (request.form.get("car_number") or "").strip().upper()
+            r["car_number"] = car
+            r["car_code"] = car
+
+            r["telegram_chat_id"] = (request.form.get("telegram_chat_id") or "").strip()
+            r["can_use_parking"] = bool(request.form.get("can_use_parking"))
+            r["can_subscribe_parking"] = bool(request.form.get("can_subscribe_parking"))
+
+            try:
+                r["max_active_spots"] = max(1, int(request.form.get("max_active_spots") or 1))
+            except Exception:
+                r["max_active_spots"] = 1
+
+            users, _ = ensure_users_schema(users)
+            save_users(users)
+            flash("Жилец обновлён.", "success")
+            return redirect(url_for("admin_users"))
+
+        if entity == "guest":
+            try:
+                guest_id = int(request.form.get("guest_id") or 0)
+            except Exception:
+                guest_id = 0
+
+            g = None
+            for item in guests:
+                if isinstance(item, dict) and int(item.get("id", 0) or 0) == guest_id:
+                    g = item
+                    break
+            if not g:
+                flash("Гость не найден.", "error")
+                return redirect(url_for("admin_users"))
+
+            if action == "delete":
+                guests = [x for x in guests if int(x.get("id", 0) or 0) != guest_id]
+                guests_data["guests"] = guests
+                save_guests(guests_data)
+                flash("Гость удалён.", "success")
+                return redirect(url_for("admin_users"))
+
+            g["name"] = (request.form.get("name") or "").strip()
+            g["phone"] = normalize_phone((request.form.get("phone") or "").strip())
+            g["car_number"] = (request.form.get("car_number") or "").strip().upper()
+            g["telegram_chat_id"] = (request.form.get("telegram_chat_id") or "").strip()
+            g["can_use_parking"] = bool(request.form.get("can_use_parking"))
+            g["can_subscribe_parking"] = bool(request.form.get("can_subscribe_parking"))
+            try:
+                g["max_active_spots"] = max(1, int(request.form.get("max_active_spots") or 1))
+            except Exception:
+                g["max_active_spots"] = 1
+
+            guests_data["guests"] = guests
+            save_guests(guests_data)
+            flash("Гость обновлён.", "success")
+            return redirect(url_for("admin_users"))
+
+        flash("Неизвестное действие.", "error")
+        return redirect(url_for("admin_users"))
+
+    # GET: подготовка таблиц
+    residents_view = []
+    if isinstance(users, dict):
+        for apt, rec in users.items():
+            if not isinstance(rec, dict):
+                continue
+            rs = rec.get("residents")
+            if not isinstance(rs, list):
+                continue
+            for r in rs:
+                if not isinstance(r, dict):
+                    continue
+                residents_view.append(
+                    {
+                        "apartment": str(apt),
+                        "resident_id": str(r.get("resident_id") or ""),
+                        "name": str(r.get("name") or ""),
+                        "last_name": str(r.get("last_name") or ""),
+                        "first_name": str(r.get("first_name") or ""),
+                        "middle_name": str(r.get("middle_name") or ""),
+                        "phone1": str(r.get("phone") or ""),
+                        "phone2": str((r.get("phones") or [""])[0] or "") if isinstance(r.get("phones"), list) else "",
+                        "car_number": str(r.get("car_number") or r.get("car_code") or ""),
+                        "telegram_chat_id": str(r.get("telegram_chat_id") or ""),
+                        "can_use_parking": bool(r.get("can_use_parking")),
+                        "can_subscribe_parking": bool(r.get("can_subscribe_parking")),
+                        "max_active_spots": int(r.get("max_active_spots") or 1),
+                    }
+                )
+
+    def _apt_key(x):
+        a = x.get("apartment") or ""
+        try:
+            return (0, int(a))
+        except Exception:
+            return (1, a)
+
+    residents_view.sort(key=_apt_key)
+    guests_sorted = [g for g in guests if isinstance(g, dict)]
+    guests_sorted.sort(key=lambda x: int(x.get("id", 0) or 0), reverse=True)
+
+    return render_template("admin_users.html", residents=residents_view, guests=guests_sorted)
 
 @app.route("/register/<token>", methods=["GET", "POST"])
 def register(token: str):
@@ -2234,7 +2580,8 @@ def register(token: str):
         invites[token] = invite
         save_invites(invites)
 
-        session["user"] = {"apartment": apartment, "name": name, "is_admin": admin}
+        session["user"] = {"apartment": apartment, "resident_id": "", "name": "", "is_admin": admin}
+
         flash("Регистрация завершена. Добро пожаловать!", "success")
         return redirect(url_for("news"))
 
