@@ -1103,6 +1103,31 @@ body:not(.dark-theme) .parking-spot-btn--busy { color: #1e40af; }
 
         </div>
     </div>
+    <!-- Модалка подтверждения: занять ещё одно место -->
+    <div class="parking-modal-backdrop" id="parkingConfirmMultiModal">
+        <div class="parking-modal">
+            <div class="parking-modal-header">
+                <h2 class="parking-modal-title">Занять ещё одно место?</h2>
+                <button class="parking-modal-close" type="button" data-role="confirm-multi-cancel">&times;</button>
+            </div>
+
+            <div class="parking-modal-body">
+                <div class="parking-modal-hint" id="confirmMultiText">
+                    У вас уже есть занятые места.
+                </div>
+                <div id="confirmMultiList" class="parking-modal-hint" style="opacity:.9;"></div>
+            </div>
+
+            <div class="parking-modal-footer">
+                <button type="button" class="parking-btn parking-btn-secondary" data-role="confirm-multi-cancel">
+                    Отмена
+                </button>
+                <button type="button" class="parking-btn parking-btn-primary" id="confirmMultiOkBtn">
+                    Занять ещё одно
+                </button>
+            </div>
+        </div>
+    </div>
 
     <script>
         document.addEventListener("DOMContentLoaded", function () {
@@ -1206,6 +1231,54 @@ if (guestCheckBtn) {
             const modalOwnerNote = document.getElementById("parkingModalOwnerNote");
 
             const modalError = document.getElementById("parkingModalError");
+			// --- Модалка подтверждения "занять ещё одно место" ---
+const confirmMultiBackdrop = document.getElementById("parkingConfirmMultiModal");
+const confirmMultiText = document.getElementById("confirmMultiText");
+const confirmMultiList = document.getElementById("confirmMultiList");
+const confirmMultiOkBtn = document.getElementById("confirmMultiOkBtn");
+
+let confirmMultiResolver = null;
+
+function openConfirmMultiModal(occupiedArr, maxAllowed) {
+    return new Promise((resolve) => {
+        confirmMultiResolver = resolve;
+
+        const occupied = (occupiedArr || []).filter(Boolean);
+        const occupiedStr = occupied.length ? occupied.join(", ") : "—";
+
+        if (confirmMultiText) {
+            confirmMultiText.textContent = `У вас уже заняты места: ${occupiedStr}. Разрешено до ${maxAllowed}.`;
+        }
+        if (confirmMultiList) {
+            confirmMultiList.textContent = "Подтвердите, что вы действительно хотите занять ещё одно место.";
+        }
+
+        if (confirmMultiBackdrop) confirmMultiBackdrop.classList.add("is-open");
+    });
+}
+
+function closeConfirmMultiModal(result) {
+    if (confirmMultiBackdrop) confirmMultiBackdrop.classList.remove("is-open");
+    if (confirmMultiResolver) {
+        const r = confirmMultiResolver;
+        confirmMultiResolver = null;
+        r(!!result);
+    }
+}
+
+// закрываем ТОЛЬКО по кнопкам/крестику (как у вас в основной модалке)
+if (confirmMultiBackdrop) {
+    confirmMultiBackdrop.addEventListener("click", (e) => {
+        const role = e.target.dataset.role;
+        if (role === "confirm-multi-cancel") {
+            closeConfirmMultiModal(false);
+        }
+    });
+}
+if (confirmMultiOkBtn) {
+    confirmMultiOkBtn.addEventListener("click", () => closeConfirmMultiModal(true));
+}
+
 
 
             // блок с фото + ссылка + сама картинка
@@ -1790,56 +1863,94 @@ if (btnSubscribe) {
     });
 }
 
+btnSave.addEventListener("click", async () => {
+    if (!currentSpotId) return;
+    clearError();
 
-            btnSave.addEventListener("click", async () => {
-                if (!currentSpotId) return;
-                clearError();
+    const untilVal = inputUntil.value ? inputUntil.value : "";
+    const phoneVal = inputPhone.value.trim();
+    const carCodeVal = inputCarCode.value.trim();
+    const showPhoneVal = inputShowPhone.checked;
+    const longTermVal = inputLongTerm.checked;
 
-                const untilVal = inputUntil.value ? inputUntil.value : "";
-                const phoneVal = inputPhone.value.trim();
-                const carCodeVal = inputCarCode.value.trim();
-                const showPhoneVal = inputShowPhone.checked;
-                const longTermVal = inputLongTerm.checked;
+    try {
+        let forceMulti = false;
 
-                try {
-                    const resp = await fetch(`/api/parking/spot/${currentSpotId}/occupy`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            until: untilVal || "",
-                            phone: phoneVal,
-                            car_code: carCodeVal,
-                            show_phone: showPhoneVal,
-                            long_term: longTermVal
-                        })
-                    });
-                    const data = await resp.json();
-                    if (!resp.ok || !data.ok) {
-                        const err = data.error || "Ошибка при сохранении";
-
-                        if (err === "spot_busy") {
-                            showError("Это место сейчас занято другим пользователем.");
-                        } else if (err === "bad_until") {
-                            showError("Неверный формат времени. Попробуйте ещё раз.");
-                        } else if (err === "already_has_spot") {
-                            const otherId = data.current_spot_id;
-                            if (otherId) {
-                                showError(`У вас уже занято место ${otherId}. Сначала освободите его, затем попробуйте занять другое.`);
-                            } else {
-                                showError("У вас уже занято одно место. Сначала освободите его, затем попробуйте занять другое.");
-                            }
-                        } else {
-                            showError("Не удалось сохранить данные. Попробуйте ещё раз.");
-                        }
-                        return;
-                    }
-                    await fetchSpotsAndRefresh();
-                    closeModal();
-                } catch (e) {
-                    console.error(e);
-                    showError("Ошибка сети. Попробуйте ещё раз.");
-                }
+        while (true) {
+            const resp = await fetch(`/api/parking/spot/${currentSpotId}/occupy`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    until: untilVal || "",
+                    phone: phoneVal,
+                    car_code: carCodeVal,
+                    show_phone: showPhoneVal,
+                    long_term: longTermVal,
+                    force_multi: forceMulti
+                })
             });
+
+            const data = await resp.json();
+            if (!resp.ok || !data.ok) {
+                const err = data.error || "Ошибка при сохранении";
+
+if (err === "confirm_multi") {
+    const occupiedArr = (data.occupied_spots || []);
+    const max = data.max_active_spots || "";
+    const ok = await openConfirmMultiModal(occupiedArr, max);
+
+    if (ok) {
+        forceMulti = true;
+        continue; // повторяем запрос уже с force_multi
+    }
+
+    showError("Действие отменено.");
+    return;
+}
+
+
+                if (err === "limit_reached") {
+                    const occupied = (data.occupied_spots || []).join(", ");
+                    const max = data.max_active_spots || "";
+                    showError(`Достигнут лимит активных мест (${max}). Сейчас заняты: ${occupied || "—"}.`);
+                    return;
+                }
+
+                if (err === "spot_busy") {
+                    showError("Это место сейчас занято другим пользователем.");
+                    return;
+                }
+
+                if (err === "bad_until") {
+                    showError("Неверный формат времени. Попробуйте ещё раз.");
+                    return;
+                }
+
+                if (err === "already_has_spot") {
+                    const otherId = data.current_spot_id;
+                    if (otherId) {
+                        showError(`У вас уже занято место №${otherId}. Сначала освободите его, затем попробуйте занять другое.`);
+                    } else {
+                        showError("У вас уже занято одно место. Сначала освободите его, затем попробуйте занять другое.");
+                    }
+                    return;
+                }
+
+                showError("Не удалось сохранить данные. Попробуйте ещё раз.");
+                return;
+            }
+
+            break; // успех
+        }
+
+        await fetchSpotsAndRefresh();
+        closeModal();
+    } catch (e) {
+        console.error(e);
+        showError("Ошибка сети. Попробуйте ещё раз.");
+    }
+});
+
 
             btnFree.addEventListener("click", async () => {
                 if (!currentSpotId) return;

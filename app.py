@@ -784,20 +784,86 @@ def admin_required(view_func):
 
 
 def get_user_key() -> str:
-    """Стабильный ключ пользователя для реакций/подписок/парковки."""
-    user = session.get("user") or {}
-    apt = str(user.get("apartment") or "").strip()
+    """
+    Уникальный ключ владельца:
+      - жильцы: "<apartment>:<resident_id>" (если resident_id есть)
+      - гости:  "<apartment>:g<guest_id>"
+    """
+    sess_user = session.get("user") or {}
+    apartment = str(sess_user.get("apartment") or "").strip()
+    if not apartment:
+        return ""
 
-    if user.get("is_guest"):
-        gid = str(user.get("guest_id") or "").strip()
-        return f"guest:{gid}" if gid else (f"guest:{apt}" if apt else "guest")
+    if bool(sess_user.get("is_guest")):
+        gid = str(sess_user.get("guest_id") or "").strip()
+        return f"{apartment}:g{gid}" if gid else apartment
 
-    rid = str(user.get("resident_id") or "").strip()
-    if apt and rid:
-        return f"{apt}:{rid}"
+    rid = str(sess_user.get("resident_id") or "").strip()
+    if rid:
+        return f"{apartment}:{rid}"
 
-    name = str(user.get("name") or "").strip()
-    return f"{apt}:{name}" if name else apt
+    # fallback (на случай старых сессий)
+    name = str(sess_user.get("name") or "").strip()
+    return f"{apartment}:{name}" if name else apartment
+
+
+def get_current_owner_keys(user: dict, apartment: str) -> set[str]:
+    """
+    Набор ключей, которыми считаем "это я" (для совместимости):
+      - новое: get_user_key()
+      - старое: apartment
+      - старое: apartment:name
+    """
+    keys: set[str] = set()
+    apt = str(apartment or "").strip()
+    if apt:
+        keys.add(apt)
+
+    me = get_user_key()
+    if me:
+        keys.add(me)
+
+    name = str((session.get("user") or {}).get("name") or "").strip()
+    if apt and name:
+        keys.add(f"{apt}:{name}")
+
+    return keys
+
+
+def get_spot_owner_key(info: dict | None) -> str:
+    if not isinstance(info, dict):
+        return ""
+    return str(info.get("owner_key") or info.get("user_key") or info.get("apartment") or "").strip()
+
+
+def get_user_max_active_spots(user: dict, apartment: str) -> int:
+    """
+    Лимит активных мест:
+      - жильцы: берём из текущего resident (current_user_parking_flags возвращает resident)
+      - гости: guests.json -> guest.max_active_spots
+      - админ: без лимита
+    """
+    if bool(user.get("is_admin")):
+        return 999
+
+    try:
+        if bool(user.get("is_guest")):
+            gid = user.get("guest_id")
+            guests_data = load_guests()
+            guests = guests_data.get("guests") or []
+            for g in guests:
+                if str(g.get("id")) == str(gid):
+                    return max(1, int(g.get("max_active_spots") or 1))
+            return 1
+
+        # Жилец: resident приходит третьим элементом из current_user_parking_flags()
+        _, _, resident, _, _ = current_user_parking_flags()
+        if isinstance(resident, dict):
+            return max(1, int(resident.get("max_active_spots") or 1))
+        return 1
+    except Exception:
+        return 1
+
 
 
 def user_has_any_pin(user_record: dict | None) -> bool:
@@ -984,6 +1050,7 @@ def admin_guests():
                                 spots_state[sid] = {
                                     "occupied": True,
                                     "apartment": guest_apartment,          # теперь гость = владелец
+                                    "owner_key": guest_apartment,
                                     "guest_id": guest_id,
                                     "is_guest": True,
 
@@ -1674,7 +1741,7 @@ def api_parking_occupy(spot_id: int):
       - если админ ставит место "надолго" (для брошенной машины и т.п.),
         квартиру админа в карточке не показываем (apartment оставляем пустым).
     """
-    sess_user, apartment, _, can_use_parking, _ = current_user_parking_flags()
+    sess_user, apartment, resident, can_use_parking, _ = current_user_parking_flags()
     user = sess_user
     if user.get("is_guest") and (user.get("guest_status") or "pending") != "approved":
         return jsonify({"ok": False, "error": "guest_not_approved"}), 403
@@ -1709,25 +1776,67 @@ def api_parking_occupy(spot_id: int):
     subscriptions = state.setdefault("subscriptions", {})
     sid = str(spot_id)
 
-    # если не админ — проверяем, не занято ли уже другое место этим же пользователем
+    # Лимит активных мест (max_active_spots). По умолчанию 1.
+    # Если пользователь уже занимает место и пытается занять ещё одно:
+    #   - при превышении лимита -> limit_reached / already_has_spot
+    #   - если лимит позволяет, но это доп. место -> confirm_multi (нужно подтверждение с фронта)
     if not is_admin:
-        me_key = get_user_key()
+        current_keys = get_current_owner_keys(user, apartment)
+        max_spots = get_user_max_active_spots(user, apartment)
+
+        occupied_by_me: list[int] = []
         for other_sid, info in spots.items():
             if other_sid == sid:
                 continue
+            if not isinstance(info, dict):
+                continue
+            owner_key = get_spot_owner_key(info)
+            if owner_key and owner_key in current_keys:
+                try:
+                    occupied_by_me.append(int(other_sid))
+                except Exception:
+                    pass
 
-            owner_key = str(info.get("user_key") or "").strip()
-            same_owner = (owner_key == me_key) if owner_key else (
-                str(info.get("apartment") or "").strip() == apartment
-            )
+        existing_here = spots.get(sid)
+        existing_owner_key = get_spot_owner_key(existing_here)
+        is_my_existing = bool(existing_owner_key) and (existing_owner_key in current_keys)
 
-            if same_owner:
+        # Лимит применяем только если это попытка занять НОВОЕ место (не обновление своего же)
+        if not is_my_existing:
+            if len(occupied_by_me) >= max_spots:
+                # для совместимости со старым фронтом при лимите=1 оставляем already_has_spot
+                if max_spots <= 1:
+                    return (
+                        jsonify(
+                            {
+                                "ok": False,
+                                "error": "already_has_spot",
+                                "current_spot_id": (occupied_by_me[0] if occupied_by_me else None),
+                            }
+                        ),
+                        409,
+                    )
                 return (
                     jsonify(
                         {
                             "ok": False,
-                            "error": "already_has_spot",
-                            "current_spot_id": int(other_sid),
+                            "error": "limit_reached",
+                            "max_active_spots": max_spots,
+                            "occupied_spots": occupied_by_me,
+                        }
+                    ),
+                    409,
+                )
+
+            # если места ещё есть по лимиту, но это дополнительная бронь — просим подтверждение
+            if occupied_by_me and not bool(payload.get("force_multi", False)):
+                return (
+                    jsonify(
+                        {
+                            "ok": False,
+                            "error": "confirm_multi",
+                            "max_active_spots": max_spots,
+                            "occupied_spots": occupied_by_me,
                         }
                     ),
                     409,
@@ -1742,7 +1851,7 @@ def api_parking_occupy(spot_id: int):
 
     # Чужое занятое место трогать нельзя, кроме админа
     if existing and not is_admin:
-        ex_key = str(existing.get("user_key") or "").strip()
+        ex_key = str(existing.get("owner_key") or existing.get("user_key") or "").strip()
         if ex_key:
             if ex_key != get_user_key():
                 return jsonify({"ok": False, "error": "spot_busy"}), 409
@@ -1766,11 +1875,13 @@ def api_parking_occupy(spot_id: int):
     # - админ, если ставит "надолго", не светит свою квартиру (для брошенных машин).
     if is_admin and long_term:
         occupant_apartment = ""
+        occupant_owner_key = ""
     else:
         occupant_apartment = apartment
+        occupant_owner_key = get_user_key() or apartment
 
-    # пробуем подтянуть telegram_chat_id из профиля пользователя
-    telegram_chat_id = ""
+
+
     try:
         users = load_users()
         user_row = users.get(apartment)
@@ -1783,10 +1894,19 @@ def api_parking_occupy(spot_id: int):
     guest_id_to_save = user.get("guest_id") if user.get("is_guest") else prev_guest_id
     is_guest_to_save = bool(user.get("is_guest")) or prev_is_guest
 
+    # telegram_chat_id берём из текущего resident (после миграции он хранится там)
+    telegram_chat_id = ""
+    try:
+        if isinstance(resident, dict):
+            telegram_chat_id = (resident.get("telegram_chat_id") or "").strip()
+    except Exception:
+        telegram_chat_id = ""
+
+
     spots[sid] = {
         "apartment": occupant_apartment,
-        "apartment": occupant_apartment,
-        "user_key": (get_user_key() if occupant_apartment else ""),
+        "owner_key": occupant_owner_key,
+        "user_key": occupant_owner_key,
         "name": user.get("name") or "",
         "car_code": car_code,
         "phone": phone if show_phone else "",
@@ -1838,7 +1958,8 @@ def api_parking_free(spot_id: int):
             save_parking_state(state)
         return jsonify({"ok": True, "spot_id": spot_id})  # уже свободно
 
-    owner_key = str(existing.get("user_key") or "").strip()
+
+    owner_key = str(existing.get("owner_key") or existing.get("user_key") or "").strip()
     if owner_key:
         if owner_key != get_user_key() and not is_admin:
             return jsonify({"ok": False, "error": "forbidden"}), 403
