@@ -22,6 +22,7 @@
           <th>Подписки</th>
           <th>Telegram chat_id</th>
           <th>Лимит мест</th>
+		  <th>QR</th>
           <th>Действия</th>
         </tr>
       </thead>
@@ -58,6 +59,15 @@
           <td style="text-align:center;">
             <input form="{{form_id}}" type="number" min="1" step="1" name="max_active_spots" value="{{ r.max_active_spots }}" style="width:70px;">
           </td>
+		  <td style="text-align:center;">
+  {% if r.qr_img_url_big %}
+    <a href="{{ r.qr_img_url_big }}" target="_blank" rel="noopener" title="Открыть QR крупно">
+      <img src="{{ r.qr_img_url_thumb }}" alt="QR" style="width:44px;height:44px;border-radius:10px;border:1px solid rgba(0,0,0,.12);">
+    </a>
+  {% else %}
+    —
+  {% endif %}
+</td>
 
           <td style="white-space:nowrap;">
             <form id="{{form_id}}" method="post" style="display:inline;">

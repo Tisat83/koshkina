@@ -214,6 +214,18 @@
         flex: 0 0 auto;
         padding-inline: 0.85rem;
     }
+	
+	/* "Отмена" в тёмной модалке гостя должна быть читаемой даже в светлой теме */
+.guest-form-modal .guest-submit-row .btn-secondary {
+    color: #e5e7eb;
+    border-color: rgba(148, 163, 184, 0.6);
+    background: rgba(15, 23, 42, 0.35);
+}
+
+.guest-form-modal .guest-submit-row .btn-secondary:hover {
+    background: rgba(37, 99, 235, 0.15);
+    border-color: rgba(96, 165, 250, 0.95);
+}
 
     .guest-form-modal-close {
         position: absolute;
@@ -615,6 +627,11 @@
                         Отмена
                     </button>
                 </div>
+				<div class="guest-helper" style="opacity:.95;">
+    Отправляя заявку, вы соглашаетесь с
+    <a href="{{ url_for('privacy') }}" target="_blank" rel="noopener">политикой обработки персональных данных</a>.
+    <a href="#" data-privacy-open>Коротко</a>
+</div>
 
                 <div class="guest-helper">
                     После одобрения заявки администратором вам будет проще бронировать места
@@ -634,6 +651,26 @@
     </p>
     <button type="button" class="guest-success-close" id="guestSuccessClose">Перейти на парковку</button>
   </div>
+</div>
+<!-- Модалка: политика (коротко) -->
+<div class="guest-success-backdrop" id="privacyModal" aria-hidden="true">
+    <div class="guest-success-modal" role="dialog" aria-modal="true" aria-label="Политика персональных данных">
+        <h3>Персональные данные — коротко</h3>
+
+        <p style="margin-top: 0.5rem;">
+            Мы используем данные (телефон/авто/имя, если указано) только для работы парковки и связи.
+            Фото сохраняется только если вы сами прикрепили его в заявке.
+        </p>
+
+        <p style="opacity:.9;">
+            Полный текст:
+            <a href="{{ url_for('privacy') }}" target="_blank" rel="noopener">открыть политику</a>
+        </p>
+
+        <div class="guest-success-actions">
+            <button type="button" class="btn-secondary" id="privacyCloseBtn">Закрыть</button>
+        </div>
+    </div>
 </div>
 
 
@@ -829,6 +866,37 @@ if (data && data.ok) {
         }
 
     });
+// --- Политика (коротко): модалка ---
+(function () {
+    const privacyModal = document.getElementById("privacyModal");
+    const privacyCloseBtn = document.getElementById("privacyCloseBtn");
+    const privacyOpenLinks = document.querySelectorAll("[data-privacy-open]");
+
+    function openPrivacy(e) {
+        if (e) e.preventDefault();
+        if (!privacyModal) return;
+        privacyModal.classList.add("is-open");
+        document.documentElement.style.overflow = "hidden";
+        document.body.style.overflow = "hidden";
+    }
+
+    function closePrivacy(e) {
+        if (e) e.preventDefault();
+        if (!privacyModal) return;
+        privacyModal.classList.remove("is-open");
+        document.documentElement.style.overflow = "";
+        document.body.style.overflow = "";
+    }
+
+    privacyOpenLinks.forEach((a) => a.addEventListener("click", openPrivacy));
+    if (privacyCloseBtn) privacyCloseBtn.addEventListener("click", closePrivacy);
+
+    if (privacyModal) {
+        privacyModal.addEventListener("click", (e) => {
+            if (e.target === privacyModal) closePrivacy(e);
+        });
+    }
+})();
 
 </script>
 

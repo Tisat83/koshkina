@@ -1593,6 +1593,9 @@ def logout():
     flash("Вы вышли из системы.", "info")
     return redirect(url_for("index"))
 
+@app.route("/privacy")
+def privacy():
+    return render_template("privacy.html")
 
 @app.route("/profile", methods=["GET", "POST"])
 @login_required
@@ -2705,6 +2708,15 @@ def admin_users():
             for r in rs:
                 if not isinstance(r, dict):
                     continue
+                qr_token = str(r.get("qr_token") or "").strip()
+                qr_url = url_for("public_resident_qr", token=qr_token, _external=True) if qr_token else ""
+
+                qr_img_url_thumb = ""
+                qr_img_url_big = ""
+                if qr_url:
+                    qr_img_url_thumb = "https://api.qrserver.com/v1/create-qr-code/?size=90x90&data=" + quote_plus(qr_url)
+                    qr_img_url_big = "https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=" + quote_plus(qr_url)
+
                 residents_view.append(
                     {
                         "apartment": str(apt),
@@ -2720,6 +2732,8 @@ def admin_users():
                         "can_use_parking": bool(r.get("can_use_parking")),
                         "can_subscribe_parking": bool(r.get("can_subscribe_parking")),
                         "max_active_spots": int(r.get("max_active_spots") or 1),
+                        "qr_img_url_thumb": qr_img_url_thumb,
+                        "qr_img_url_big": qr_img_url_big,
                     }
                 )
 

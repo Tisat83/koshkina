@@ -51,6 +51,12 @@
         </div>
 
         <button type="submit" class="btn-primary">Зарегистрироваться</button>
+		<div class="auth-hint" style="margin-top: 12px; font-size: 0.9rem; line-height: 1.35;">
+    Нажимая «Зарегистрироваться», вы соглашаетесь с
+    <a href="{{ url_for('privacy') }}" target="_blank" rel="noopener">политикой обработки персональных данных</a>.
+    <a href="#" id="privacyOpenLink">Коротко</a>
+</div>
+
     </form>
 
     <p class="auth-hint">
@@ -58,4 +64,81 @@
         Никто, включая администратора, не может посмотреть его в явном виде.
     </p>
 </section>
+<!-- Модалка: политика (коротко) -->
+<style>
+    .legal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,.55);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 14px;
+        z-index: 9999;
+    }
+    .legal-backdrop.is-open { display: flex; }
+    .legal-modal {
+        width: 100%;
+        max-width: 520px;
+        background: #fff;
+        border-radius: 16px;
+        padding: 14px 16px;
+        box-shadow: 0 10px 30px rgba(0,0,0,.25);
+    }
+    .legal-modal h3 { margin: 0 0 8px 0; }
+    .legal-modal p { margin: 0 0 10px 0; line-height: 1.35; }
+    .legal-actions { display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; }
+</style>
+
+<div class="legal-backdrop" id="privacyModal" aria-hidden="true">
+    <div class="legal-modal" role="dialog" aria-modal="true" aria-label="Политика персональных данных">
+        <h3>Персональные данные — коротко</h3>
+        <p>
+            Мы используем данные (телефон/авто/ФИО, если указано) только для работы парковки и связи между участниками.
+            Фото сохраняется только если вы сами прикрепили его в заявке.
+        </p>
+        <p style="opacity:.9;">
+            Полный текст — по ссылке:
+            <a href="{{ url_for('privacy') }}" target="_blank" rel="noopener">открыть политику</a>.
+        </p>
+
+        <div class="legal-actions">
+            <button type="button" class="btn-secondary" id="privacyCloseBtn">Закрыть</button>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    const openLink = document.getElementById("privacyOpenLink");
+    const modal = document.getElementById("privacyModal");
+    const closeBtn = document.getElementById("privacyCloseBtn");
+
+    function openModal(e) {
+        if (e) e.preventDefault();
+        if (!modal) return;
+        modal.classList.add("is-open");
+        document.documentElement.style.overflow = "hidden";
+        document.body.style.overflow = "hidden";
+    }
+
+    function closeModal(e) {
+        if (e) e.preventDefault();
+        if (!modal) return;
+        modal.classList.remove("is-open");
+        document.documentElement.style.overflow = "";
+        document.body.style.overflow = "";
+    }
+
+    if (openLink) openLink.addEventListener("click", openModal);
+    if (closeBtn) closeBtn.addEventListener("click", closeModal);
+
+    if (modal) {
+        modal.addEventListener("click", (e) => {
+            if (e.target === modal) closeModal(e);
+        });
+    }
+});
+</script>
+
 {% endblock %}

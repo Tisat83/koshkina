@@ -52,11 +52,23 @@
         }
     </style>
     <style>
+	    /* в меню: Парковка — на ПК текст */
+    .nav-parking-icon { display: none; }
+	.nav-news-icon { display: none; }
+
+
         @media (max-width: 768px) {
             /* спрятать текст логотипа на мобилке, оставить только иконку */
             .logo-text {
                 display: none;
             }
+			        /* в меню: Парковка — на мобилке только иконка */
+        .nav-parking-text { display: none; }
+        .nav-parking-icon { display: inline; font-size: 18px; line-height: 1; }
+		        .nav-news-text { display: none; }
+        .nav-news-icon { display: inline; font-size: 18px; line-height: 1; }
+
+
         }
     </style>
 </head>
@@ -77,18 +89,26 @@
     {% if session.get('user') %}
         {% if is_guest %}
             {% if nav_can_use_parking %}
-                <a href="{{ url_for('parking') }}">Парковка</a>
+                <a href="{{ url_for('parking') }}" class="nav-parking" aria-label="Парковка" title="Парковка">
+    <span class="nav-parking-text">Парковка</span>
+    <span class="nav-parking-icon" aria-hidden="true">🅿️</span>
+</a>
+
             {% endif %}
         {% else %}
             <a href="{{ url_for('index') }}">🏠</a>
-            <a href="{{ url_for('news') }}">Новости</a>
+<a href="{{ url_for('news') }}" class="nav-news" aria-label="Новости" title="Новости">
+    <span class="nav-news-text">Новости</span>
+    <span class="nav-news-icon" aria-hidden="true">📰</span>
+</a>
+
 
             {% if nav_can_use_parking %}
-                <a href="{{ url_for('parking') }}">Парковка</a>
-            {% endif %}
+                <a href="{{ url_for('parking') }}" class="nav-parking" aria-label="Парковка" title="Парковка">
+    <span class="nav-parking-text">Парковка</span>
+    <span class="nav-parking-icon" aria-hidden="true">🅿️</span>
+</a>
 
-            {% if u.get('is_admin') %}
-                <a href="{{ url_for('admin_news_new') }}">+</a>
             {% endif %}
 			{% if u.get('is_admin') %}
   <div class="user-menu" style="margin-right:8px;">
@@ -97,6 +117,7 @@
       <a href="{{ url_for('admin_invites') }}">Приглашения</a>
       <a href="{{ url_for('admin_guests') }}">Гости</a>
       <a href="{{ url_for('admin_users') }}">Пользователи</a>
+	  <a href="{{ url_for('admin_news_new') }}">+ Новость</a>
     </div>
   </div>
 {% endif %}
@@ -148,7 +169,7 @@
             Сайт для жильцов дома. Информация не является публичной офертой.
         </span>
         {% if not (session.get('user') or {}).get('is_guest') %}
-    <a href="{{ url_for('news_archive') }}" class="footer-link">Архив новостей</a>
+    <a href="{{ url_for('news_archive') }}" class="footer-link"></a>
 {% endif %}
 
     </div>

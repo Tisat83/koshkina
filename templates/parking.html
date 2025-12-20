@@ -735,6 +735,43 @@ body:not(.dark-theme) .parking-spot-btn--busy { color: #1e40af; }
             font-size: 12px;
             color: var(--muted-text-2);
         }
+		/* --- Пресеты времени "до" --- */
+.parking-until-presets{
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.parking-until-presets-row{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.parking-until-preset,
+.parking-until-more{
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--chip-bg);
+  color: var(--text-color);
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.parking-until-preset:hover,
+.parking-until-more:hover{
+  background: var(--nav-hover-bg);
+}
+
+.parking-until-presets-more{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* --- Позвонить + таймер до конца брони (в модалке) --- */
 .parking-call-link{
   display:inline-flex;
@@ -1243,7 +1280,7 @@ body:not(.dark-theme) .parking-spot-btn--busy { color: #1e40af; }
 
                 <div class="parking-modal-row parking-modal-editable">
                     <label class="parking-modal-label" for="parkingUntil">
-                        До какого времени планируете стоять? (необязательно)
+                        До какого времени планируете стоять?
                     </label>
                     <input
                         type="datetime-local"
@@ -1252,13 +1289,30 @@ body:not(.dark-theme) .parking-spot-btn--busy { color: #1e40af; }
                         autocomplete="off"
                     >
                     <div class="parking-modal-hint">
-                        Выберите дату и время, затем нажмите Enter или кликните вне поля, чтобы закрыть календарь.
+                        Выберите дату и время нажав на поле выше или на быстрый вариант снизу
                     </div>
+					<div class="parking-until-presets parking-modal-editable" id="parkingUntilPresets">
+    <div class="parking-until-presets-row">
+        <button type="button" class="parking-until-preset" data-until-preset="tomorrow-07">До 07:00 (завтра)</button>
+        <button type="button" class="parking-until-preset" data-until-preset="tomorrow-08">До 08:00 (завтра)</button>
+        <button type="button" class="parking-until-preset" data-until-preset="next-20">До 20:00</button>
+        <button type="button" class="parking-until-preset" data-until-preset="next-21">До 21:00</button>
+        <button type="button" class="parking-until-preset" data-until-preset="plus-1h">На 1 час</button>
+        <button type="button" class="parking-until-preset" data-until-preset="plus-2h">На 2 часа</button>
+
+        <button type="button" class="parking-until-more" id="parkingUntilMoreBtn" aria-expanded="false">
+            Ещё ▾
+        </button>
+    </div>
+
+    <div class="parking-until-presets-more" id="parkingUntilMore" style="display:none;"></div>
+</div>
+
                 </div>
 
                 <div class="parking-modal-row parking-modal-editable">
                     <label class="parking-modal-label" for="parkingCarCode">
-                        Номер машины (3 цифры или полный номер)
+                        Номер машины
                     </label>
                     <input
                         type="text"
@@ -1270,7 +1324,7 @@ body:not(.dark-theme) .parking-spot-btn--busy { color: #1e40af; }
 
                 <div class="parking-modal-row parking-modal-editable">
                     <label class="parking-modal-label" for="parkingPhone">
-                        Телефон для связи (для перекрывающих мест)
+                        Телефон для связи
                     </label>
                     <input type="tel" id="parkingPhone" class="parking-modal-input" placeholder="+7 900 000-00-00">
                     <label class="parking-modal-label">
@@ -1279,7 +1333,7 @@ body:not(.dark-theme) .parking-spot-btn--busy { color: #1e40af; }
                     </label>
                 </div>
 
-                <div class="parking-modal-row">
+                <div class="parking-modal-row" id="parkingModalOwnerRow">
                     <div class="parking-modal-label">
                         Текущий владелец — <span id="parkingModalOwnerTop" class="parking-modal-hint">—</span>
                     </div>
@@ -1520,6 +1574,7 @@ if (helpEl) {
             const modalOwnerTop = document.getElementById("parkingModalOwnerTop");
             const modalOwnerBottom = document.getElementById("parkingModalOwnerBottom");
             const modalOwnerNote = document.getElementById("parkingModalOwnerNote");
+			const modalOwnerRow = document.getElementById("parkingModalOwnerRow");
 
             const modalError = document.getElementById("parkingModalError");
 			// --- Модалка подтверждения "занять ещё одно место" ---
@@ -1598,6 +1653,127 @@ if (confirmMultiOkBtn) {
                 inputUntil.addEventListener("click", openPicker);
                 inputUntil.addEventListener("focus", openPicker);
             }
+			// --- Пресеты времени для "До какого времени" ---
+const untilPresetsWrap = document.getElementById("parkingUntilPresets");
+const untilMoreBtn = document.getElementById("parkingUntilMoreBtn");
+const untilMoreBox = document.getElementById("parkingUntilMore");
+
+function pad2(n){ return String(n).padStart(2, "0"); }
+
+function toDatetimeLocalValue(dt){
+  const y = dt.getFullYear();
+  const m = pad2(dt.getMonth() + 1);
+  const d = pad2(dt.getDate());
+  const hh = pad2(dt.getHours());
+  const mm = pad2(dt.getMinutes());
+  return `${y}-${m}-${d}T${hh}:${mm}`;
+}
+
+function setUntil(dt){
+  if (!inputUntil) return;
+  try {
+    dt.setSeconds(0, 0);
+  } catch(_) {}
+  inputUntil.value = toDatetimeLocalValue(dt);
+  inputUntil.dispatchEvent(new Event("change", { bubbles: true }));
+  try { inputUntil.blur(); } catch(_) {}
+}
+
+function nextOccurrenceAt(hour, minute){
+  const now = new Date();
+  const dt = new Date(now);
+  dt.setHours(hour, minute, 0, 0);
+  if (dt.getTime() <= now.getTime()) {
+    dt.setDate(dt.getDate() + 1);
+  }
+  return dt;
+}
+
+function tomorrowAt(hour, minute){
+  const dt = new Date();
+  dt.setDate(dt.getDate() + 1);
+  dt.setHours(hour, minute, 0, 0);
+  return dt;
+}
+
+function buildMorePresets(){
+  if (!untilMoreBox) return;
+  untilMoreBox.innerHTML = "";
+  // --- "До HH:00" ближайшие варианты (шаг 1 час) ---
+const now = new Date();
+const nextHour = new Date(now);
+nextHour.setMinutes(0, 0, 0);
+nextHour.setHours(nextHour.getHours() + 1);
+
+// 10 ближайших "До"
+for (let i = 0; i < 10; i++) {
+  const dt = new Date(nextHour.getTime() + i * 60 * 60 * 1000);
+  const hh = pad2(dt.getHours());
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "parking-until-preset";
+  b.textContent = `До ${hh}:00`;
+  b.addEventListener("click", () => setUntil(dt));
+  untilMoreBox.appendChild(b);
+}
+
+// перенос строки перед "На 3/4 часа"
+const sep = document.createElement("div");
+sep.style.flexBasis = "100%";
+sep.style.height = "0";
+untilMoreBox.appendChild(sep);
+
+
+// короткие шаги: 3..4 часа (остальное — руками в календаре)
+const hoursList = [3,4];
+
+  hoursList.forEach((h) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "parking-until-preset";
+    b.textContent = `На ${h} ${h === 1 ? "час" : (h >= 2 && h <= 4 ? "часа" : "часов")}`;
+    b.addEventListener("click", () => {
+      const dt = new Date(Date.now() + h * 60 * 60 * 1000);
+      setUntil(dt);
+    });
+    untilMoreBox.appendChild(b);
+  });
+}
+
+function toggleMore(open){
+  if (!untilMoreBtn || !untilMoreBox) return;
+  untilMoreBox.style.display = open ? "flex" : "none";
+  untilMoreBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  untilMoreBtn.textContent = open ? "Скрыть ▴" : "Ещё ▾";
+  if (open) buildMorePresets();
+}
+
+if (untilPresetsWrap && inputUntil) {
+  // клики по основным пресетам
+  untilPresetsWrap.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-until-preset]");
+    if (!btn) return;
+
+    e.preventDefault();
+
+    const preset = String(btn.getAttribute("data-until-preset") || "");
+    if (preset === "tomorrow-07") setUntil(tomorrowAt(7, 0));
+    else if (preset === "tomorrow-08") setUntil(tomorrowAt(8, 0));
+    else if (preset === "next-20") setUntil(nextOccurrenceAt(20, 0));
+    else if (preset === "next-21") setUntil(nextOccurrenceAt(21, 0));
+    else if (preset === "plus-1h") setUntil(new Date(Date.now() + 1 * 60 * 60 * 1000));
+    else if (preset === "plus-2h") setUntil(new Date(Date.now() + 2 * 60 * 60 * 1000));
+  });
+
+  if (untilMoreBtn) {
+    untilMoreBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      const isOpen = untilMoreBtn.getAttribute("aria-expanded") === "true";
+      toggleMore(!isOpen);
+    });
+  }
+}
+
 let untilCountdownTimer = null;
 
 function escapeHtml(str){
@@ -1717,6 +1893,7 @@ function startUntilCountdown(untilStr){
                 const longTerm = occ && occ.long_term;
 
                if (occ) {
+    if (modalOwnerRow) modalOwnerRow.style.display = "flex";		   
     let who;
 
     if (
@@ -1775,10 +1952,16 @@ if (modalOwnerNote) {
 } else {
     stopUntilCountdown();
     modalStatus.textContent = "Свободно";
-    if (modalOwnerTop) modalOwnerTop.textContent = "—";
-    if (modalOwnerBottom) modalOwnerBottom.textContent = "Место свободно.";
+
+    // скрываем весь блок "Текущий владелец / Телефон / подсказки" — чтобы не было дублей
+    if (modalOwnerRow) modalOwnerRow.style.display = "none";
+
+    // на всякий случай чистим значения (если модалка открывалась до этого на занятом месте)
+    if (modalOwnerTop) modalOwnerTop.textContent = "";
+    if (modalOwnerBottom) modalOwnerBottom.textContent = "";
     if (modalOwnerNote) modalOwnerNote.textContent = "";
 }
+
 
 // показать / скрыть фото гостя
 if (modalOwnerPhotoBox && modalOwnerPhotoImg && modalOwnerPhotoLink) {
@@ -1877,7 +2060,7 @@ if (occ) {
                     btnSave.textContent = occupiedByMe ? "Обновить данные" : "Занять место (как админ)";
 } else if (readOnly) {
     if (modalOwnerNote) {
-        modalOwnerNote.textContent = "Изменить может владелец или админ.";
+        modalOwnerNote.textContent = "";
     }
 } else {
 
