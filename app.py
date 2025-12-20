@@ -14,7 +14,7 @@ except Exception:
 import secrets
 from functools import wraps
 from datetime import date, datetime
-from urllib.parse import urlparse, urlencode
+from urllib.parse import urlparse, urlencode, quote_plus
 import time
 from urllib.request import urlopen
 from werkzeug.utils import secure_filename
@@ -208,6 +208,7 @@ DEFAULT_RESIDENT_FIELDS = {
     "can_use_parking": False,
     "can_subscribe_parking": False,
     "telegram_chat_id": "",
+    "qr_token": "",
     "max_active_spots": 1,
 }
 
@@ -300,6 +301,11 @@ def ensure_users_schema(users) -> tuple[dict, bool]:
                 if k not in r:
                     r[k] = [] if isinstance(v, list) else v
                     changed = True
+
+            # Личный QR-токен жильца (если пустой/нет — создаём)
+            if not str(r.get("qr_token") or "").strip():
+                r["qr_token"] = secrets.token_urlsafe(16)
+                changed = True
 
             # нормализуем max_active_spots
             try:
@@ -976,6 +982,90 @@ def parking_guest():
         disabled_spots=disabled_spots,
     )
 
+def _find_resident_by_qr_token(token: str):
+    token = (token or "").strip()
+    if not token:
+        return None, None
+
+    users = load_users()
+    for apt, apt_record in (users or {}).items():
+        for r in (apt_record.get("residents") or []):
+            if str(r.get("qr_token") or "").strip() == token:
+                return str(apt), r
+    return None, None
+
+
+
+@app.route("/q/<token>")
+def public_resident_qr(token: str):
+    token = (token or "").strip()
+    if not token:
+        return redirect(url_for("parking_guest"))
+
+    apartment, resident = _find_resident_by_qr_token(token)
+    if not apartment or not isinstance(resident, dict):
+        return redirect(url_for("parking_guest"))
+
+    # Ключи владельца (учитываем совместимость)
+    owner_keys = set()
+    rid = str(resident.get("resident_id") or "").strip()
+    if rid:
+        owner_keys.add(f"{apartment}:{rid}")
+    name = str(resident.get("name") or "").strip()
+    if name:
+        owner_keys.add(f"{apartment}:{name}")
+    owner_keys.add(apartment)
+
+    state = load_parking_state()
+    spots = (state.get("spots") or {})
+
+    found_sid = None
+    found_info = None
+    for sid, info in spots.items():
+        if not isinstance(info, dict):
+            continue
+        if get_spot_owner_key(info) in owner_keys:
+            found_sid = sid
+            found_info = info
+            break
+
+    # Если человек сейчас НЕ занял место — ведём на гостевую регистрацию
+    if not found_sid or not isinstance(found_info, dict):
+        return redirect(url_for("parking_guest"))
+
+    # Красивый label места
+    spot_label = f"Место {found_sid}"
+    try:
+        parking_cfg = load_parking()
+        for sp in (parking_cfg.get("spots") or []):
+            if str(sp.get("id")) == str(found_sid):
+                spot_label = sp.get("label") or spot_label
+                break
+    except Exception:
+        pass
+
+    # Телефон жильца берём из профиля (QR — это явное “разрешаю связаться”)
+    phone = str(resident.get("phone") or "").strip()
+    if not phone:
+        phones = resident.get("phones") or []
+        if isinstance(phones, list) and phones:
+            phone = str(phones[0] or "").strip()
+
+    until = str(found_info.get("until") or "").strip()
+    long_term = bool(found_info.get("long_term"))
+    car_code = str(found_info.get("car_code") or found_info.get("car_number") or "").strip()
+
+    return render_template(
+        "qr_contact.html",
+        spot_label=spot_label,
+        phone=phone,
+        until=until,
+        long_term=long_term,
+        car_code=car_code,
+        guest_url=url_for("parking_guest", _external=True),
+    )
+
+
 @app.route("/admin/guests", methods=["GET", "POST"])
 @login_required
 @admin_required
@@ -1562,6 +1652,20 @@ def profile():
 
     can_use_parking = bool(resident.get("can_use_parking", False) or is_admin)
     can_subscribe_parking = bool(resident.get("can_subscribe_parking", False) or is_admin)
+    # Личный QR жильца (публичная ссылка)
+    qr_url = ""
+    qr_img_url = ""
+
+    qr_token = str(resident.get("qr_token") or "").strip()
+    if not qr_token:
+        qr_token = secrets.token_urlsafe(16)
+        resident["qr_token"] = qr_token
+        save_users(users)
+
+    qr_url = url_for("public_resident_qr", token=qr_token, _external=True)
+    qr_img_url = f"https://api.qrserver.com/v1/create-qr-code/?size=220x220&data={quote_plus(qr_url)}"
+
+
 
     if request.method == "POST":
         last_name = (request.form.get("last_name") or "").strip()
@@ -1617,6 +1721,8 @@ def profile():
         car_number=car_number,
         can_use_parking=can_use_parking,
         can_subscribe_parking=can_subscribe_parking,
+        qr_url=qr_url,
+        qr_img_url=qr_img_url,
     )
 
 

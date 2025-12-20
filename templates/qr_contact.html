@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Контакт по парковке</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #f6f7f9; color: #111; }
+        .wrap { max-width: 560px; margin: 0 auto; padding: 16px; }
+        .card { background: #fff; border-radius: 16px; padding: 16px; box-shadow: 0 6px 18px rgba(0,0,0,.06); border: 1px solid rgba(0,0,0,.06); }
+        h1 { font-size: 18px; margin: 0 0 8px; }
+        .muted { color: #555; font-size: 14px; margin: 0 0 10px; }
+        .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+        .btn { display: inline-flex; align-items:center; justify-content:center; gap: 8px; padding: 12px 14px; border-radius: 12px; text-decoration: none; font-weight: 600; font-size: 16px; }
+        .btn-primary { background: #2f6fed; color: #fff; }
+        .btn-secondary { background: #eef2ff; color: #1a2a6a; }
+        .kv { font-size: 15px; margin: 8px 0; }
+        .kv b { display:inline-block; min-width: 110px; }
+        code { background:#f2f3f5; padding:2px 6px; border-radius: 8px; }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <div class="card">
+            <h1>Контакт по парковке</h1>
+            <p class="muted">Сканируете QR под стеклом — здесь быстрый контакт с владельцем места.</p>
+
+            <div class="kv"><b>Место:</b> {{ spot_label }}</div>
+
+            {% if car_code %}
+                <div class="kv"><b>Авто:</b> <code>{{ car_code }}</code></div>
+            {% endif %}
+
+            {% if long_term %}
+                <div class="kv"><b>Статус:</b> надолго</div>
+            {% elif until %}
+                <div class="kv"><b>Занято до:</b> {{ until }}</div>
+            {% endif %}
+
+            {% if phone %}
+                <div class="row">
+                    <a class="btn btn-primary" href="tel:+{{ phone }}">Позвонить</a>
+                </div>
+                <p class="muted" style="margin-top:10px;">Телефон: +{{ phone }}</p>
+            {% else %}
+                <p class="muted" style="margin-top:10px;">У жильца не указан телефон в профиле.</p>
+            {% endif %}
+
+            <hr style="border:none; border-top:1px solid rgba(0,0,0,.08); margin: 14px 0;">
+
+            <div class="row">
+                <a class="btn btn-secondary" href="{{ guest_url }}">Перейти к гостевой регистрации</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

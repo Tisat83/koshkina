@@ -81,6 +81,37 @@
                 placeholder="+7 903 888-88-88"
             >
         </div>
+		{% if (not is_guest) and can_use_parking and qr_url %}
+<hr style="margin: 12px 0; border: none; border-top: 1px solid var(--border-color);">
+
+<div class="form-group">
+    <label>Ваш личный QR-код (для гостей)</label>
+
+    <div style="display:flex; gap:14px; align-items:flex-start; flex-wrap:wrap;">
+        <div>
+            <img
+                src="{{ qr_img_url }}"
+                alt="QR-код"
+                style="width:180px; height:180px; border:1px solid var(--border-color); border-radius:12px; background:#fff;"
+            >
+        </div>
+
+        <div style="flex:1; min-width:220px;">
+            <p class="auth-hint" style="margin-top:0;">
+                Если вы сейчас заняли место на парковке, гость увидит номер места и сможет позвонить вам.
+                Если вы место не занимали — откроется страница гостевой регистрации.
+            </p>
+
+            <input type="text" value="{{ qr_url }}" readonly onclick="this.select()">
+
+            <p class="auth-hint" style="margin:8px 0 0;">
+                Ссылку можно скопировать/сохранить и распечатать QR.
+            </p>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 
         {# Блок машины показываем только если для квартиры включена парковка #}
         {% if can_use_parking %}

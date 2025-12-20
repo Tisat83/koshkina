@@ -59,17 +59,86 @@
   </div>
 </div>
 
-    <h1>Парковка двора</h1>
-    <p class="auth-description">
-        Здесь интерактивная схема парковки нашего двора. Можно выбирать
-        место на картинке (по номеру машинки) или в списке ниже, занимать
-        его и указывать время стоянки и контакт для связи.
-    </p>
+    <h1>Парковка в нашем дворе</h1>
+
+
+	    <!-- Мобильный режим: только схема -->
+    <div class="parking-mobile-toolbar">
+        <button
+            type="button"
+            id="parkingCompactToggle"
+            class="parking-btn parking-btn-secondary parking-compact-toggle"
+            aria-pressed="false"
+        >
+            Только схема
+        </button>
+    </div>
 
     <style>
         .parking-layout {
             margin-top: 12px; /* только отступ, без flex */
         }
+		        /* --- Мобильный режим "Только схема" --- */
+        .parking-mobile-toolbar {
+            display: none;
+            margin: 10px 0 6px;
+            justify-content: flex-end;
+        }
+
+        @media (max-width: 768px) {
+            .parking-mobile-toolbar {
+                display: flex;
+            }
+        }
+		        /* --- Справка/инструкция --- */
+        .parking-help {
+            margin: 8px 0 10px;
+            border: 1px solid rgba(0,0,0,.08);
+            border-radius: 12px;
+            padding: 8px 10px;
+            background: rgba(0,0,0,.02);
+        }
+
+        .parking-help-summary {
+            cursor: pointer;
+            font-weight: 700;
+            list-style: none;
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .parking-help-summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .parking-help-hint {
+            font-weight: 400;
+            opacity: 0.75;
+            font-size: 0.9em;
+            white-space: nowrap;
+        }
+
+        .parking-help-body {
+            margin-top: 8px;
+        }
+
+        /* На телефоне по умолчанию свернуто, на ПК можно оставить открытым через JS ниже */
+        @media (max-width: 768px) {
+            .parking-help-hint {
+                display: none;
+            }
+        }
+
+        /* когда включён режим "Только схема" */
+        #parking-root.parking-compact .auth-description,
+		#parking-root.parking-compact .parking-help,
+        #parking-root.parking-compact .parking-spots,
+        #parking-root.parking-compact figure.parking-figure:not(.parking-figure-top) {
+            display: none !important;
+        }
+
 
         .parking-figure {
             margin: 0;
@@ -100,6 +169,27 @@
             border-radius: 16px;
             box-shadow: var(--shadow-soft);
         }
+		/* --- Упрощённый режим: фокус на зоне мест 1–12 --- */
+.parking-map-inner {
+    position: relative;
+}
+
+/* В "Упростить" делаем карту "окном" */
+#parking-root.parking-compact .parking-image-wrapper {
+    overflow: hidden;
+}
+
+/* Сдвигаем и увеличиваем содержимое, чтобы показать только нужный кусок карты */
+#parking-root.parking-compact .parking-map-inner {
+    transform-origin: top left;
+    transform: scale(1.55) translate(-18%, -10%);
+}
+
+/* В упрощённом режиме прячем Zoom, чтобы не было двойного зума */
+#parking-root.parking-compact #parkingFullscreenToggle {
+    display: none !important;
+}
+
 
 /* Картинка ПАРКОВОЧНОГО МЕСТА (P) — всегда видна */
 .parking-hotspot-img {
@@ -205,6 +295,35 @@
     width: 90px;
     height: 30px;
 }
+
+/* --- Увеличение "зоны тапа" на телефонах (без изменения внешнего вида) --- */
+@media (max-width: 768px) {
+    .parking-hotspot,
+    .parking-marker {
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Умеренный хитбокс для мест 1–8 (они близко друг к другу) */
+    .parking-hotspot::before {
+        content: "";
+        position: absolute;
+        inset: -5px;   /* было бы -8, но для 2–8 это уже мешает */
+    }
+
+    /* Для перекрывающих 9–12 — чуть больше, потому что они сложнее */
+    .parking-hotspot.parking-hotspot--blocking::before {
+        inset: -8px;
+    }
+
+    /* Маркеры/значки на схеме — чуть больше, чтобы легче попадать */
+    .parking-marker::before {
+        content: "";
+        position: absolute;
+        inset: -6px;
+    }
+}
+
 
 /* Перекрывающие 9–12: поворачиваем МАШИНУ, не слот */
 .parking-hotspot--blocking .parking-hotspot-car {
@@ -437,6 +556,26 @@ body:not(.dark-theme) .parking-spot-btn--busy { color: #1e40af; }
     .parking-marker-img {
         width: 100%;
         height: auto;
+		    /* Увеличиваем "зону тапа" на мобилке: визуально не меняем, но попадать пальцем проще */
+    .parking-hotspot,
+    .parking-marker {
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Невидимый хитбокс вокруг кнопки/маркера */
+    .parking-hotspot::before,
+    .parking-marker::before {
+        content: "";
+        position: absolute;
+        inset: -8px;           /* насколько расширяем область нажатия */
+    }
+
+    /* Перекрывающие 9–12 обычно сложнее тапать — дадим чуть больше поля */
+    .parking-hotspot.parking-hotspot--blocking::before {
+        inset: -10px;
+    }
+
     }
 }
 
@@ -704,6 +843,68 @@ body:not(.dark-theme) .parking-spot-btn--busy { color: #1e40af; }
 .guest-pending-status-row .guest-pending-status{
   margin-top: 0;
 }
+        /* --- Мобильная модалка: удобочитаемость --- */
+        @media (max-width: 768px) {
+            .parking-modal {
+                width: 96vw;
+                max-width: 96vw;
+                margin: 0 auto;
+                border-radius: 16px;
+				
+				max-height: 88vh;
+                display: flex;
+                flex-direction: column;
+
+            }
+
+            .parking-modal-header {
+                padding: 12px 14px;
+            }
+
+            .parking-modal-title {
+                font-size: 18px;
+                line-height: 1.2;
+            }
+
+            .parking-modal-body {
+                padding: 12px 14px;
+                font-size: 16px;
+                line-height: 1.35;
+				overflow: auto;
+                -webkit-overflow-scrolling: touch;
+				margin-bottom: 0;
+
+            }
+
+            .parking-modal-body input,
+            .parking-modal-body select,
+            .parking-modal-body textarea {
+                font-size: 16px; /* важно для iOS, чтобы не зумил */
+                padding: 10px 12px;
+            }
+
+            .parking-modal-footer {
+                position: sticky;
+                bottom: 0;
+                background: #fff;
+                padding: 10px 12px;
+                border-top: 1px solid rgba(0,0,0,.08);
+                display: flex;
+                gap: 10px;
+            }
+
+            .parking-modal-footer .parking-btn {
+                flex: 1;
+                padding: 12px 10px;
+                font-size: 16px;
+            }
+
+            .parking-modal-close {
+                font-size: 28px;
+                line-height: 1;
+                padding: 4px 10px;
+            }
+        }
 
     </style>
 
@@ -722,6 +923,7 @@ body:not(.dark-theme) .parking-spot-btn--busy { color: #1e40af; }
                     <span class="icon-collapse">✕</span>
                     Zoom
                 </button>
+				<div class="parking-map-inner" id="parkingMapInner">
 
                 <!-- Фон карты -->
                 <img src="{{ url_for('static', filename='img/parking_top.png') }}"
@@ -923,17 +1125,41 @@ body:not(.dark-theme) .parking-spot-btn--busy { color: #1e40af; }
                 </button>
 
             </div>
+			</div>
 
         </figure>
     </div>
+    <details class="parking-help" id="parkingHelp">
+    <summary class="parking-help-summary">
+        &#128226; Как пользоваться парковкой
+        <span class="parking-help-hint">(нажмите, чтобы открыть)</span>
+    </summary>
 
+    <div class="parking-help-body">
+        <p class="auth-description">
+        Это интерактивная схема парковки нашего двора. 
+		<br>- Можно выбирать место на картинке (по номеру машинки), 
+		занимать его и указывать время стоянки и контакт для связи, 
+		если в профиле у вас заполнен номер телефона и номер машины,
+		то эти данные заполнятся автоматически. 
+		<br>- Если вы указываете время окончания парковки, то место освободится автоматически 
+		в указнное время. Если время не указывать, то необходимо 
+		будет освободить место в ручную. 
+		<br>- Так же нажмите на установленные знаки в треугольниках. 
+		<br>- Схему можно приблизить или отдалить при нажатии 
+		на Zoom в левом верхнем углу на карте
+        </p>
+		        <p class="parking-spots-note">
+            Ровно так же место можно и занять через блок ниже "Места на парковке".
+			Выбираете номер с нужным свободное местом и занимаете его указав 
+			примерно время когда планируете его освободить.
+            Занятое место подсвечивается, при клике видно, кто и до какого времени там стоит.
+        </p>
+    </div>
+    </details>
     <!-- БЛОК С МЕСТАМИ -->
     <div class="parking-spots">
         <h2 class="parking-spots-title">Места на парковке</h2>
-        <p class="parking-spots-note">
-            Можно нажать на машинку на схеме или выбрать место в списке ниже.
-            Занятое место подсвечивается, при клике видно, кто и до какого времени там стоит.
-        </p>
 
         {% set regular = spots | selectattr('id', 'in', [1,2,3,4,5,6,7,8]) | list %}
         {% set blocking = spots | selectattr('type', 'equalto', 'blocking') | list %}
@@ -1223,7 +1449,72 @@ if (guestCheckBtn) {
   });
 }
 
-            const modalBackdrop = document.getElementById("parkingModal");
+            // --- Режим "Только схема" (мобильный) ---
+const compactBtn = document.getElementById("parkingCompactToggle");
+const COMPACT_KEY = "parking_compact_mode";
+
+function applyCompactMode(on) {
+    if (!root) return;
+    root.classList.toggle("parking-compact", !!on);
+	// если включаем "Упростить" — выходим из fullscreen/zoom режима
+if (on) {
+    const layoutEl = document.querySelector(".parking-layout");
+    const fsBtn = document.getElementById("parkingFullscreenToggle");
+    if (layoutEl) layoutEl.classList.remove("parking-layout-fullscreen");
+    if (fsBtn) {
+        fsBtn.classList.remove("is-active");
+        fsBtn.setAttribute("aria-pressed", "false");
+    }
+}
+
+
+    if (compactBtn) {
+        compactBtn.textContent = on ? "Расширить" : "Упростить";
+        compactBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+}
+
+if (compactBtn) {
+    // восстановить выбор
+    let saved = false;
+    try {
+        saved = localStorage.getItem(COMPACT_KEY) === "1";
+    } catch (_) {
+        saved = false;
+    }
+    applyCompactMode(saved);
+	// --- Справка: на ПК открыта, на телефоне закрыта ---
+const helpEl = document.getElementById("parkingHelp");
+if (helpEl) {
+    const isMobile = window.matchMedia && window.matchMedia("(max-width: 768px)").matches;
+    // на мобиле закрыто, на ПК открыто
+    helpEl.open = !isMobile;
+
+    // если включили "Только схема", справку тоже закрываем
+    if (root && root.classList.contains("parking-compact")) {
+        helpEl.open = false;
+    }
+
+    // когда пользователь переключает режим — не трогаем help автоматически,
+    // кроме случая включения compact (тогда закрываем)
+    if (compactBtn) {
+        compactBtn.addEventListener("click", () => {
+            const nowCompact = root.classList.contains("parking-compact");
+            if (nowCompact) helpEl.open = false;
+        });
+    }
+}
+
+    compactBtn.addEventListener("click", () => {
+        const nowOn = !root.classList.contains("parking-compact");
+        applyCompactMode(nowOn);
+        try {
+            localStorage.setItem(COMPACT_KEY, nowOn ? "1" : "0");
+        } catch (_) {}
+    });
+}
+
+			const modalBackdrop = document.getElementById("parkingModal");
             const modalTitle = document.getElementById("parkingModalTitle");
             const modalStatus = document.getElementById("parkingModalStatus");
             const modalOwnerTop = document.getElementById("parkingModalOwnerTop");
