@@ -345,9 +345,10 @@ def ensure_users_schema(users) -> tuple[dict, bool]:
         # пересобираем root phones как union (для совместимости со старым кодом/поиском)
         union = []
         def add_phone(p):
-            p = str(p or "").strip()
+            p = normalize_phone(str(p or ""))
             if p and p not in union:
                 union.append(p)
+
 
         if isinstance(rec.get("phones"), list):
             for p in rec["phones"]:
@@ -360,6 +361,23 @@ def ensure_users_schema(users) -> tuple[dict, bool]:
             if isinstance(r.get("phones"), list):
                 for p in r["phones"]:
                     add_phone(p)
+        # best-effort: если ровно один resident без phone и ровно один “лишний” телефон в квартире —
+        # кладём этот телефон ему (частый случай после регистрации по invite)
+        used = set()
+        missing = []
+        for r in residents:
+            if not isinstance(r, dict):
+                continue
+            rp = normalize_phone(r.get("phone") or "")
+            if rp:
+                used.add(rp)
+            if not rp and not (isinstance(r.get("phones"), list) and r.get("phones")):
+                missing.append(r)
+
+        unused = [p for p in union if p not in used]
+        if len(missing) == 1 and len(unused) == 1:
+            missing[0]["phone"] = unused[0]
+            changed = True
 
         if union != rec.get("phones"):
             rec["phones"] = union
@@ -1782,6 +1800,8 @@ def parking():
         user["car_code"] = car_code
     user["can_use_parking"] = can_use_parking
     user["can_subscribe_parking"] = can_subscribe_parking
+    user["user_key"] = get_user_key()
+
 
     return render_template(
         "parking.html",
@@ -1961,13 +1981,17 @@ def api_parking_occupy(spot_id: int):
     # Чужое занятое место трогать нельзя, кроме админа
     if existing and not is_admin:
         ex_key = str(existing.get("owner_key") or existing.get("user_key") or "").strip()
+        my_key = get_user_key() or ""
         if ex_key:
-            if ex_key != get_user_key():
+            if ex_key != my_key:
                 return jsonify({"ok": False, "error": "spot_busy"}), 409
         else:
+            # legacy-запись без owner_key: раньше это было "по квартире",
+            # но при нескольких жильцах в одной квартире так делать нельзя.
+            if ":" in my_key:
+                return jsonify({"ok": False, "error": "spot_busy"}), 409
             if str(existing.get("apartment") or "").strip() != apartment:
                 return jsonify({"ok": False, "error": "spot_busy"}), 409
-
 
     # long_term: админ может выставлять/снимать, обычный пользователь не трогает
     if is_admin:
@@ -2067,15 +2091,17 @@ def api_parking_free(spot_id: int):
             save_parking_state(state)
         return jsonify({"ok": True, "spot_id": spot_id})  # уже свободно
 
-
     owner_key = str(existing.get("owner_key") or existing.get("user_key") or "").strip()
+    my_key = get_user_key() or ""
     if owner_key:
-        if owner_key != get_user_key() and not is_admin:
+        if owner_key != my_key and not is_admin:
             return jsonify({"ok": False, "error": "forbidden"}), 403
     else:
+        # legacy-запись без owner_key: по квартире разрешаем только старым сессиям без resident_id
+        if ":" in my_key and not is_admin:
+            return jsonify({"ok": False, "error": "forbidden"}), 403
         if str(existing.get("apartment") or "").strip() != apartment and not is_admin:
             return jsonify({"ok": False, "error": "forbidden"}), 403
-
 
     # человекочитаемое название места
     parking_cfg = load_parking()
@@ -2759,11 +2785,11 @@ def register(token: str):
         flash("Эта ссылка недействительна или уже была использована.", "error")
         return redirect(url_for("login"))
 
-    apartment = invite.get("apartment")
+    apartment = str(invite.get("apartment") or "").strip()
 
     if request.method == "POST":
         name = (request.form.get("name") or "").strip()
-        phone = (request.form.get("phone") or "").strip()
+        phone_raw = (request.form.get("phone") or "").strip()
         pin1 = (request.form.get("pin1") or "").strip()
         pin2 = (request.form.get("pin2") or "").strip()
 
@@ -2779,21 +2805,18 @@ def register(token: str):
             flash("PIN должен состоять из 4–8 цифр.", "error")
             return redirect(url_for("register", token=token))
 
+        # Нормализуем телефон (храним единообразно)
+        phone_norm = normalize_phone(phone_raw)
+
         users = load_users()
+        if not isinstance(users, dict):
+            users = {}
+
         existing = users.get(apartment, {})
+        if not isinstance(existing, dict):
+            existing = {}
 
-        # телефоны как справочная инфа (может быть несколько)
-        phones = []
-        if phone:
-            phones.append(phone.strip())
-        if isinstance(existing.get("phones"), list):
-            for p in existing["phones"]:
-                if p:
-                    phones.append(str(p).strip())
-        elif isinstance(existing.get("phone"), str):
-            phones.append(existing["phone"].strip())
-
-        # перенос старого формата pin_hash -> residents
+        # --- Residents: поддержка старого формата + список жильцов ---
         residents = existing.get("residents")
         if not isinstance(residents, list):
             residents = []
@@ -2807,8 +2830,70 @@ def register(token: str):
                     }
                 )
 
-        residents.append({"name": name, "pin_hash": hash_pin(pin1)})
-        admin = is_admin_for(str(apartment), existing)
+        # Собираем уже занятые resident_id
+        used_ids = set()
+        for rr in residents:
+            if isinstance(rr, dict):
+                rid = str(rr.get("resident_id") or "").strip()
+                if rid:
+                    used_ids.add(rid)
+
+        # Проставим resident_id и дефолты старым жильцам (если чего-то нет)
+        for rr in residents:
+            if not isinstance(rr, dict):
+                continue
+            if not str(rr.get("resident_id") or "").strip():
+                rr["resident_id"] = _next_resident_id(apartment, used_ids)
+                used_ids.add(rr["resident_id"])
+
+            # дефолты в resident
+            for k, v in DEFAULT_RESIDENT_FIELDS.items():
+                if k not in rr:
+                    rr[k] = [] if isinstance(v, list) else v
+
+        # --- Создаём нового жильца ---
+        new_resident = {"name": name, "pin_hash": hash_pin(pin1)}
+        new_resident["resident_id"] = _next_resident_id(apartment, used_ids)
+
+        for k, v in DEFAULT_RESIDENT_FIELDS.items():
+            if k not in new_resident:
+                new_resident[k] = [] if isinstance(v, list) else v
+
+        # телефон кладём в resident (это фиксит “в профиле пусто”)
+        new_resident["phone"] = phone_norm
+        if "phones" not in new_resident or not isinstance(new_resident["phones"], list):
+            new_resident["phones"] = []
+
+        # если поле qr_token есть в DEFAULT_RESIDENT_FIELDS — оставляем как есть,
+        # иначе просто не трогаем (чтобы не было NameError / лишних импортов)
+
+        residents.append(new_resident)
+
+        # --- Телефоны квартиры: делаем список нормализованных уникальных ---
+        phones = []
+
+        def _add_phone(p):
+            pn = normalize_phone(str(p or ""))
+            if pn and pn not in phones:
+                phones.append(pn)
+
+        # сохраняем то, что было, но нормализуем
+        if isinstance(existing.get("phones"), list):
+            for p in existing.get("phones", []):
+                _add_phone(p)
+        elif isinstance(existing.get("phone"), str):
+            _add_phone(existing.get("phone"))
+
+        # добавляем телефоны всех жильцов (и нового тоже)
+        for rr in residents:
+            if not isinstance(rr, dict):
+                continue
+            _add_phone(rr.get("phone"))
+            if isinstance(rr.get("phones"), list):
+                for p in rr.get("phones", []):
+                    _add_phone(p)
+
+        admin = is_admin_for(apartment, existing)
 
         users[apartment] = {
             "residents": residents,
@@ -2821,7 +2906,13 @@ def register(token: str):
         invites[token] = invite
         save_invites(invites)
 
-        session["user"] = {"apartment": apartment, "resident_id": "", "name": "", "is_admin": admin}
+        # ВАЖНО: resident_id кладём в сессию — это фиксит баг “после регистрации вижу первого жильца”
+        session["user"] = {
+            "apartment": apartment,
+            "resident_id": new_resident["resident_id"],
+            "name": new_resident.get("name") or "",
+            "is_admin": admin,
+        }
 
         flash("Регистрация завершена. Добро пожаловать!", "success")
         return redirect(url_for("news"))

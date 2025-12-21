@@ -19,6 +19,7 @@
     class="info-section parking-section"
     id="parking-root"
     data-user-apartment="{{ user.get('apartment', '') }}"
+	data-user-key="{{ user.get('user_key', '') }}"
     data-user-is-admin="{{ '1' if user.get('is_admin') else '0' }}"
     data-user-phone="{{ user.get('phone', '') }}"
     data-user-car-number="{{ user.get('car_code') or user.get('car_number', '') }}"
@@ -1413,12 +1414,30 @@ body:not(.dark-theme) .parking-spot-btn--busy { color: #1e40af; }
         document.addEventListener("DOMContentLoaded", function () {
             const root = document.getElementById("parking-root");
             const userApartment = (root.dataset.userApartment || "").trim();
+			const userKey = (root.dataset.userKey || "").trim();
             const isAdmin = root.dataset.userIsAdmin === "1";
             const userPhone = (root.dataset.userPhone || "").trim();
             const userCarNumber = (root.dataset.userCarNumber || "").trim();
 			const canSubscribe = root.dataset.userCanSubscribe === "1";
 			const isGuest = root.dataset.userIsGuest === "1";
 let guestStatus = (root.dataset.userGuestStatus || "").trim().toLowerCase();
+function getOccOwnerKey(occ) {
+    if (!occ) return "";
+    return String(occ.owner_key || occ.user_key || "").trim();
+}
+
+function isMineOccupant(occ) {
+    const k = getOccOwnerKey(occ);
+    if (k && userKey) return k === userKey;
+
+    // legacy: если owner_key нет, раньше считали "моё" по квартире.
+    // Но если у пользователя есть resident_id (userKey содержит ":"), это нельзя.
+    if (!k && userApartment && userKey.indexOf(":") === -1) {
+        return String(occ.apartment || "").trim() === userApartment;
+    }
+    return false;
+}
+
 
 const guestOverlay = document.getElementById("guestPendingOverlay");
 const guestStatusEl = document.getElementById("guestPendingStatus");
@@ -1997,7 +2016,7 @@ if (modalOwnerPhotoBox && modalOwnerPhotoImg && modalOwnerPhotoLink) {
 
 
 
-                const occupiedByMe = !!(occ && occ.apartment === userApartment);
+                const occupiedByMe = isMineOccupant(occ);
                 const occupied = !!occ;
                 const readOnly = occupied && !occupiedByMe && !isAdmin;
 				
@@ -2120,7 +2139,7 @@ document.querySelectorAll(".parking-hotspot").forEach((el) => {
 
     if (info.occupied && info.occupant) {
         const occ = info.occupant;
-        const mine = occ.apartment === userApartment;
+        const mine = isMineOccupant(occ);
 
         el.classList.add("parking-hotspot--occupied");
         if (!mine && !isAdmin) {
