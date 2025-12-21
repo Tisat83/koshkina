@@ -690,11 +690,11 @@ body:not(.dark-theme) .parking-spot-btn--busy { color: #1e40af; }
         }
 
         .parking-modal-footer {
-            display: flex;
-            justify-content: flex-end;
-            gap: 8px;
-            margin-top: 4px;
-        }
+              display: flex;
+              flex-wrap: wrap;
+              gap: 10px;
+              padding: 10px 10px;
+            }
 
         .parking-btn {
             border-radius: 999px;
@@ -932,10 +932,11 @@ body:not(.dark-theme) .parking-spot-btn--busy { color: #1e40af; }
             }
 
             .parking-modal-footer .parking-btn {
-                flex: 1;
-                padding: 12px 10px;
-                font-size: 16px;
-            }
+                  flex: 1 1 calc(50% - 8px);
+                  font-size: 14px;
+                  line-height: 1.2;
+                  padding: 10px 12px;
+                }
 
             .parking-modal-close {
                 font-size: 28px;
@@ -2076,15 +2077,29 @@ if (occ) {
 
                 if (occupied && (occupiedByMe || isAdmin)) {
                     btnFree.style.display = "inline-block";
-                    btnSave.textContent = occupiedByMe ? "Обновить данные" : "Занять место (как админ)";
-} else if (readOnly) {
-    if (modalOwnerNote) {
-        modalOwnerNote.textContent = "";
-    }
-} else {
 
+                    if (occupiedByMe) {
+                        btnSave.textContent = "Обновить данные";
+                        btnSave.dataset.mode = "update";
+                    } else if (isAdmin) {
+                        // админ редактирует чужую бронь: сохраняем без “захвата”
+                        btnSave.textContent = "Сохранить";
+                        btnSave.dataset.mode = "admin_edit";
+                    } else {
+                        btnSave.textContent = "Занять место";
+                        btnSave.dataset.mode = "occupy";
+                    }
+
+                } else if (readOnly) {
+                    if (modalOwnerNote) {
+                        modalOwnerNote.textContent = "";
+                    }
+                    btnSave.dataset.mode = "occupy";
+                } else {
                     btnSave.textContent = "Занять место";
+                    btnSave.dataset.mode = "occupy";
                 }
+
 
                 modalBackdrop.classList.add("is-open");
             }
@@ -2379,7 +2394,8 @@ btnSave.addEventListener("click", async () => {
                     car_code: carCodeVal,
                     show_phone: showPhoneVal,
                     long_term: longTermVal,
-                    force_multi: forceMulti
+                    force_multi: forceMulti,
+					admin_edit: (btnSave.dataset.mode === "admin_edit"),
                 })
             });
 

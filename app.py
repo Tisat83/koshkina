@@ -2003,17 +2003,37 @@ def api_parking_occupy(spot_id: int):
     else:
         long_term = bool(existing.get("long_term")) if existing else False
 
-    # Квартира в записи:
-    # - обычный пользователь всегда пишет свою квартиру;
-    # - админ, если ставит "надолго", не светит свою квартиру (для брошенных машин).
+    # Квартира/владелец в записи:
+    # - обычный пользователь всегда пишет себя;
+    # - админ:
+    #     * если ставит "надолго" — скрывает себя (apartment/owner пустые)
+    #     * если редактирует чужую бронь — НЕ перезаписывает owner_key на себя
+    my_key = (get_user_key() or apartment).strip()
+    prev_owner_key = get_spot_owner_key(prev)
+    prev_apartment = str(prev.get("apartment") or "").strip()
+
+    is_editing_foreign = bool(
+        is_admin
+        and prev
+        and not long_term
+        and (
+            (prev_owner_key and prev_owner_key != my_key)
+            or (not prev_owner_key and prev_apartment and prev_apartment != apartment)
+        )
+    )
+
     if is_admin and long_term:
         occupant_apartment = ""
         occupant_owner_key = ""
+    elif is_editing_foreign:
+        occupant_apartment = prev_apartment
+        occupant_owner_key = (
+            prev_owner_key
+            or str(prev.get("owner_key") or prev.get("user_key") or prev_apartment).strip()
+        )
     else:
         occupant_apartment = apartment
-        occupant_owner_key = get_user_key() or apartment
-
-
+        occupant_owner_key = my_key
 
     try:
         users = load_users()
@@ -2027,20 +2047,23 @@ def api_parking_occupy(spot_id: int):
     guest_id_to_save = user.get("guest_id") if user.get("is_guest") else prev_guest_id
     is_guest_to_save = bool(user.get("is_guest")) or prev_is_guest
 
-    # telegram_chat_id берём из текущего resident (после миграции он хранится там)
+    # telegram_chat_id:
+    # - обычно берём из своего resident
+    # - админ при правке чужой брони НЕ должен перезаписывать telegram_chat_id на себя
     telegram_chat_id = ""
     try:
-        if isinstance(resident, dict):
+        if is_editing_foreign:
+            telegram_chat_id = (prev.get("telegram_chat_id") or "").strip()
+        elif isinstance(resident, dict):
             telegram_chat_id = (resident.get("telegram_chat_id") or "").strip()
     except Exception:
         telegram_chat_id = ""
-
 
     spots[sid] = {
         "apartment": occupant_apartment,
         "owner_key": occupant_owner_key,
         "user_key": occupant_owner_key,
-        "name": user.get("name") or "",
+        "name": (prev.get("name") if is_editing_foreign else (user.get("name") or "")) or "",
         "car_code": car_code,
         "phone": phone if show_phone else "",
         "show_phone": show_phone,
